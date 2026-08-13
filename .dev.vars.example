@@ -1,0 +1,23 @@
+# 复制为 .dev.vars 后填入本地开发用的密钥（.dev.vars 已被 .gitignore 忽略，勿提交）。
+# 生产环境请改用：npx wrangler secret put <NAME>
+
+# Telegram Bot Token（找 @BotFather 创建 bot 获取）
+TG_BOT_TOKEN=""
+
+# 保护 /api 写操作（/api/run、/api/config 等）的口令，自定义一个强随机串
+ADMIN_TOKEN=""
+
+# Telegram webhook 校验密钥（订阅制用；setWebhook 时作为 secret_token 传入）
+TG_WEBHOOK_SECRET=""
+
+# 个人 QQ / NapCat（可留空）：你自建 NapCat 的 OneBot HTTP 地址与 access token
+NAPCAT_BASE_URL=""
+NAPCAT_TOKEN=""
+
+# QQ 官方机器人（QQ 开放平台）：机器人 ID(AppID) 与机器人密钥(AppSecret)
+QQ_BOT_APPID=""
+QQ_BOT_SECRET=""
+
+# Pixiv 图片反代域名（仅域名，不含 https://）；也可在 wrangler.jsonc 的 vars 里配。
+# 例如 i.example.com —— 会把图片地址里的 i.pximg.net 替换为该域名以绕过防盗链。
+PIXIV_PROXY_HOST=""
