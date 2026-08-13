@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>插画推送 · 管理后台</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --card2:#15181e; --border:#2a2f3a; --fg:#e6e8ec; --mut:#9aa3b2; --acc:#7c9cff; --ok:#4ade80; --bad:#f87171; --warn:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--fg); }
+  header { position:sticky; top:0; z-index:20; padding:14px 24px; border-bottom:1px solid var(--border); background:rgba(15,17,21,.92); backdrop-filter:blur(8px); display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:space-between; }
+  h1 { font-size:17px; margin:0; }
+  .wrap { max-width:1120px; margin:0 auto; padding:20px 24px 80px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:18px; }
+  .section-title { font-size:15px; margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+  .section-desc { color:var(--mut); font-size:12px; margin:0 0 12px; line-height:1.6; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .between { display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+  .kv { font-size:13px; color:var(--mut); } .kv b { color:var(--fg); }
+  .pill { font-size:12px; padding:3px 9px; border-radius:999px; border:1px solid var(--border); white-space:nowrap; }
+  .pill.ok { color:var(--ok); border-color:#2f5d3f; } .pill.bad { color:var(--bad); border-color:#5d2f2f; }
+  .pill.warn { color:var(--warn); border-color:#5d4b2f; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:4px; border:1px solid var(--border); color:var(--mut); }
+  .tag.d1 { color:var(--acc); border-color:#38477a; } .tag.env { color:var(--warn); border-color:#5d4b2f; }
+  input,button,select,textarea { font:inherit; }
+  input[type=text],input[type=password],input[type=number],select,textarea { background:#0c0e12; border:1px solid var(--border); color:var(--fg); border-radius:8px; padding:8px 10px; width:100%; }
+  button { background:var(--acc); color:#0b0d12; border:0; border-radius:8px; padding:9px 14px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--border); }
+  button.btn-sm { padding:5px 10px; font-size:12px; }
+  button.btn-del { background:transparent; color:var(--bad); border:1px solid #5d2f2f; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  th { color:var(--mut); font-weight:600; font-size:12px; }
+  .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; align-items:end; }
+  label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--mut); }
+  .chk { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--fg); }
+  .chk input { width:auto; }
+  .muted { color:var(--mut); font-size:12px; }
+  .err { color:var(--bad); } .okc { color:var(--ok); }
+  .code { background:#0c0e12; border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--fg); overflow-x:auto; white-space:pre; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
+  .item { background:var(--card2); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .item img { width:100%; height:210px; object-fit:cover; background:#0c0e12; display:block; }
+  .item .meta { padding:9px 11px; font-size:12px; }
+  .item .t { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .item .s { color:var(--mut); margin-top:3px; }
+  a { color:var(--acc); text-decoration:none; }
+  .toast { position:fixed; right:18px; bottom:18px; z-index:50; background:var(--card); border:1px solid var(--border); border-left:3px solid var(--ok); border-radius:8px; padding:10px 14px; font-size:13px; box-shadow:0 6px 24px rgba(0,0,0,.4); opacity:0; transform:translateY(8px); transition:.2s; pointer-events:none; max-width:420px; }
+  .toast.show { opacity:1; transform:none; }
+  .toast.bad { border-left-color:var(--bad); }
+  .subgroup { border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:12px; background:var(--card2); }
+  .subgroup h3 { font-size:13px; margin:0 0 10px; color:var(--fg); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎨 插画排行推送 · 管理后台</h1>
+  <div class="row">
+    <span class="muted" id="envTag"></span>
+    <input type="password" id="token" placeholder="ADMIN_TOKEN（写操作需要）" style="width:230px" />
+    <button class="ghost btn-sm" id="refreshBtn">刷新</button>
+    <button id="runBtn">立即爬取推送</button>
+  </div>
+</header>
+<div class="wrap">
+
+  <div class="card">
+    <div class="between">
+      <div class="row" id="statusPills"></div>
+      <div class="row">
+        <button class="ghost btn-sm" onclick="runTest('telegram')">测试 Telegram</button>
+        <button class="ghost btn-sm" onclick="runTest('qqbot')">测试 QQ官方</button>
+        <button class="ghost btn-sm" onclick="runTest('napcat')">测试 NapCat</button>
+      </div>
+    </div>
+    <div id="lastRun" class="kv" style="margin-top:12px"></div>
+    <div id="runResult" class="kv" style="margin-top:8px"></div>
+    <div id="testResult" class="kv" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">🔑 密钥与凭证</h2>
+    <p class="section-desc">
+      在此填写的值保存到 <b>D1 数据库</b>，优先级高于 <code>wrangler secret</code> / <code>vars</code>；清空则回退到后者。<br>
+      接口只返回掩码，<b>永不回显原文</b>。注意 D1 中为明文存储，<b>ADMIN_TOKEN 不在此列</b>——它是保护本后台的信任根，只能用
+      <code>npx wrangler secret put ADMIN_TOKEN</code> 设置。
+    </p>
+    <table>
+      <thead><tr><th style="width:190px">名称</th><th style="width:90px">状态</th><th style="width:150px">当前值(掩码)</th><th>新值</th><th style="width:140px"></th></tr></thead>
+      <tbody id="credRows"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">🔗 Webhook 地址</h2>
+    <p class="section-desc">订阅制需要把下面地址配置到对应平台。Telegram 用 setWebhook 接口，QQ 官方在开放平台「开发设置」里填。</p>
+    <div class="subgroup">
+      <h3>Telegram</h3>
+      <div class="row" style="margin-bottom:8px"><div class="code" id="tgHook" style="flex:1"></div><button class="ghost btn-sm" onclick="copyEl('tgHook')">复制</button></div>
+      <div class="row"><div class="code" id="tgCmd" style="flex:1"></div><button class="ghost btn-sm" onclick="copyEl('tgCmd')">复制命令</button></div>
+      <div class="muted" style="margin-top:6px">把 &lt;TG_BOT_TOKEN&gt; 和 &lt;TG_WEBHOOK_SECRET&gt; 换成实际值后在终端执行。</div>
+    </div>
+    <div class="subgroup" style="margin-bottom:0">
+      <h3>QQ 官方机器人</h3>
+      <div class="row"><div class="code" id="qqHook" style="flex:1"></div><button class="ghost btn-sm" onclick="copyEl('qqHook')">复制</button></div>
+      <div class="muted" style="margin-top:6px">填到 QQ 开放平台 → 开发设置 → 回调地址；需 HTTPS，端口限 80/443/8080/8443。平台的 op=13 验证会自动通过。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">📚 数据源 / 订阅</h2>
+    <p class="section-desc">booru / Pixiv 排行榜按分级过滤后推送；RSS(RSSHub) 视为可信来源，默认跳过全年龄过滤。</p>
+    <table>
+      <thead><tr><th style="width:52px">启用</th><th style="width:90px">类型</th><th>名称</th><th>参数</th><th style="width:60px">限量</th><th style="width:52px">可信</th><th style="width:130px"></th></tr></thead>
+      <tbody id="srcRows"></tbody>
+    </table>
+    <h3 style="font-size:13px;color:var(--mut);margin:16px 0 8px" id="srcFormTitle">新增数据源</h3>
+    <div class="form-grid">
+      <label class="f">类型
+        <select id="f_adapter">
+          <option value="gelbooru">gelbooru（safebooru / gelbooru）</option>
+          <option value="moebooru">moebooru（konachan / yande.re）</option>
+          <option value="pixiv">pixiv 排行榜</option>
+          <option value="rss">rss / RSSHub</option>
+        </select></label>
+      <label class="f">名称 label<input type="text" id="f_label" placeholder="如 推特-画师X" /></label>
+      <label class="f">site / URL<input type="text" id="f_site" placeholder="booru base 或 RSSHub 完整 URL" /></label>
+      <label class="f">tags（booru）<input type="text" id="f_tags" placeholder="sort:score:desc" /></label>
+      <label class="f">mode（pixiv）<input type="text" id="f_mode" placeholder="daily / weekly / monthly" /></label>
+      <label class="f">每次取 N<input type="number" id="f_limit" value="5" min="1" max="30" /></label>
+      <label class="chk"><input type="checkbox" id="f_trusted" /> 可信（跳过全年龄过滤）</label>
+      <label class="chk"><input type="checkbox" id="f_enabled" checked /> 启用</label>
+      <input type="hidden" id="f_id" />
+      <div class="row"><button class="btn-sm" id="srcSaveBtn">保存</button><button class="btn-sm ghost" id="srcResetBtn">清空</button></div>
+    </div>
+    <div class="muted" id="srcHint" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">📤 推送渠道与全局</h2>
+    <p class="section-desc">三个渠道可并存。目标为空且无订阅者时，该渠道会被跳过（运行摘要里会提示）。</p>
+
+    <div class="subgroup">
+      <h3>Telegram</h3>
+      <div class="form-grid">
+        <label class="chk"><input type="checkbox" id="c_tg_enabled" /> 启用</label>
+        <label class="f">chat_ids（逗号分隔，可为空靠订阅）<input type="text" id="c_tg_chats" placeholder="-1001234567, 12345678" /></label>
+        <label class="f">API 反代 base（留空用官方）<input type="text" id="c_tg_api" placeholder="https://api.telegram.org" /></label>
+      </div>
+    </div>
+
+    <div class="subgroup">
+      <h3>QQ 官方机器人（QQ 开放平台）</h3>
+      <div class="form-grid">
+        <label class="chk"><input type="checkbox" id="c_qqbot_enabled" /> 启用</label>
+        <label class="f">目标（group:openid / user:openid，可为空靠订阅）<input type="text" id="c_qqbot_targets" placeholder="group:ABC123, user:XYZ789" /></label>
+      </div>
+      <div class="muted" style="margin-top:6px">主动消息有频控：认证机器人群聊约 60 条/分钟、每群每天 1000 条，建议单次上限设小。</div>
+    </div>
+
+    <div class="subgroup">
+      <h3>个人 QQ（NapCat 中转）</h3>
+      <div class="form-grid">
+        <label class="chk"><input type="checkbox" id="c_qq_enabled" /> 启用</label>
+        <label class="f">群号（逗号分隔）<input type="text" id="c_qq_groups" placeholder="123456789, 987654321" /></label>
+      </div>
+      <div class="muted" style="margin-top:6px">需在你自己的机器上运行 NapCat 并开启 OneBot HTTP 服务端（地址填在上方凭证区）。</div>
+    </div>
+
+    <div class="subgroup" style="margin-bottom:0">
+      <h3>全局</h3>
+      <div class="form-grid">
+        <label class="f">单次推送上限<input type="number" id="c_cap" value="10" min="1" max="100" /></label>
+        <label class="f">去重保留天数<input type="number" id="c_ttl" value="30" min="1" max="365" /></label>
+        <div class="row"><button class="btn-sm" id="cfgSaveBtn">保存全部渠道设置</button></div>
+      </div>
+    </div>
+    <div id="cfgMsg" class="kv" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">👥 订阅者</h2>
+    <p class="section-desc">用户对 Telegram / QQ 官方机器人发送 <code>/start</code> 即订阅、<code>/stop</code> 退订。个人 QQ(NapCat) 无此机制，按群号推送。</p>
+    <div class="row" style="margin-bottom:10px">
+      <select id="subFilter" style="width:180px">
+        <option value="all">全部平台</option>
+        <option value="telegram">telegram</option>
+        <option value="qqbot">qqbot</option>
+      </select>
+      <button class="ghost btn-sm" onclick="loadSubscribers()">筛选</button>
+    </div>
+    <table>
+      <thead><tr><th style="width:52px">状态</th><th style="width:90px">平台</th><th>名称</th><th>chat_id / openid</th><th style="width:150px">订阅时间</th><th style="width:80px"></th></tr></thead>
+      <tbody id="subRows"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2 class="section-title">🕒 运行历史</h2>
+    <table>
+      <thead><tr><th style="width:160px">时间</th><th style="width:70px">拉取</th><th style="width:80px">过滤后</th><th style="width:70px">推送</th><th>错误</th></tr></thead>
+      <tbody id="runRows"></tbody>
+    </table>
+    <p class="section-desc" style="margin:10px 0 0">定时频率在 <code>wrangler.jsonc</code> 的 <code>triggers.crons</code>（UTC）配置，默认 <code>0 1 * * *</code> = 北京时间 09:00。</p>
+  </div>
+
+  <h2 class="section-title" style="margin:0 0 10px">🖼 最近推送</h2>
+  <div id="gallery" class="grid"></div>
+  <div id="empty" class="muted" style="display:none">还没有推送记录。配置好渠道后点右上「立即爬取推送」。</div>
+</div>
+
+
+<div id="toast" class="toast"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const tokenEl = $("token");
+tokenEl.value = localStorage.getItem("adminToken") || "";
+tokenEl.addEventListener("change", () => localStorage.setItem("adminToken", tokenEl.value));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (ms) => (ms ? new Date(ms).toLocaleString("zh-CN") : "-");
+
+let TOAST_T;
+function toast(msg, bad) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(TOAST_T);
+  TOAST_T = setTimeout(() => { el.className = "toast" + (bad ? " bad" : ""); }, 3200);
+}
+
+async function api(path, method = "GET", body) {
+  const opt = { method, headers: {} };
+  if (tokenEl.value) opt.headers["Authorization"] = "Bearer " + tokenEl.value;
+  if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  return await r.json().catch(() => ({ ok: false, error: "响应解析失败" }));
+}
+
+async function copyEl(id) {
+  try { await navigator.clipboard.writeText($(id).textContent); toast("已复制"); }
+  catch { toast("复制失败，请手动选择文本", true); }
+}
+window.copyEl = copyEl;
+
+let SOURCES = [];
+let ORIGIN = location.origin;
+async function loadStatus() {
+  const d = await api("/api/status");
+  if (!d.ok) { toast("状态加载失败", true); return; }
+  ORIGIN = d.origin || location.origin;
+  $("envTag").textContent = "环境: " + (d.env || "-");
+  const pill = (label, ok) => `<span class="pill ${ok ? "ok" : "bad"}">${label}: ${ok ? "已配置" : "未配置"}</span>`;
+  $("statusPills").innerHTML =
+    pill("Telegram", d.telegramConfigured) +
+    pill("QQ官方Bot", d.qqbotConfigured) +
+    pill("个人QQ/NapCat", d.napcatConfigured) +
+    pill("Pixiv反代", d.pixivProxyConfigured) +
+    `<span class="pill ${d.adminTokenSet ? "ok" : "warn"}">ADMIN_TOKEN: ${d.adminTokenSet ? "已设置" : "未设置"}</span>`;
+  const lr = d.lastRun;
+  $("lastRun").innerHTML = lr
+    ? `上次运行: <b>${fmt(lr.finishedAt)}</b> · 拉取 <b>${lr.fetched}</b> · 过滤后 <b>${lr.filtered}</b> · 推送 <b>${lr.pushed}</b>` +
+      (lr.errors && lr.errors.length ? `<div class="err" style="margin-top:6px">错误(${lr.errors.length}): ${lr.errors.slice(0, 3).map(esc).join(" ｜ ")}</div>` : "")
+    : "尚未运行过。";
+  const c = d.config;
+  $("c_tg_enabled").checked = !!c.telegram.enabled;
+  $("c_tg_chats").value = (c.telegram.chatIds || []).join(", ");
+  $("c_tg_api").value = c.telegram.apiBase || "";
+  $("c_qqbot_enabled").checked = !!(c.qqbot && c.qqbot.enabled);
+  $("c_qqbot_targets").value = ((c.qqbot && c.qqbot.targets) || []).join(", ");
+  $("c_qq_enabled").checked = !!c.napcat.enabled;
+  $("c_qq_groups").value = (c.napcat.groupIds || []).join(", ");
+  $("c_cap").value = c.perRunTotalCap ?? 10;
+  $("c_ttl").value = c.seenTtlDays ?? 30;
+  $("tgHook").textContent = ORIGIN + "/tg/webhook";
+  $("qqHook").textContent = ORIGIN + "/qq/webhook";
+  $("tgCmd").textContent = `curl "https://api.telegram.org/bot<TG_BOT_TOKEN>/setWebhook" -d "url=${ORIGIN}/tg/webhook" -d "secret_token=<TG_WEBHOOK_SECRET>"`;
+}
+async function loadCreds() {
+  const d = await api("/api/credentials");
+  $("credRows").innerHTML = (d.items || []).map((it) => `
+    <tr>
+      <td><code>${esc(it.name)}</code></td>
+      <td>${it.configured ? '<span class="pill ok">已配置</span>' : '<span class="pill bad">未配置</span>'}</td>
+      <td class="muted">${esc(it.masked) || "-"} ${it.source !== "none" ? `<span class="tag ${it.source}">${it.source}</span>` : ""}</td>
+      <td><input type="password" id="cred_${esc(it.name)}" placeholder="填新值后点保存" /></td>
+      <td class="row">
+        <button class="btn-sm" onclick="saveCred('${esc(it.name)}')">保存</button>
+        <button class="btn-sm btn-del" onclick="delCred('${esc(it.name)}')" ${it.source === "d1" ? "" : "disabled"}>清除</button>
+      </td>
+    </tr>`).join("");
+}
+async function saveCred(name) {
+  const v = $("cred_" + name).value;
+  if (!v) { toast("请先填写新值", true); return; }
+  const d = await api("/api/credentials", "POST", { name, value: v });
+  if (d.ok) { toast(name + " 已保存到 D1"); await loadCreds(); await loadStatus(); }
+  else toast(d.error || "保存失败", true);
+}
+async function delCred(name) {
+  if (!confirm(`清除 D1 中的 ${name}？将回退到 wrangler secret / vars。`)) return;
+  const d = await api("/api/credentials?name=" + encodeURIComponent(name), "DELETE");
+  if (d.ok) { toast(name + " 已清除"); await loadCreds(); await loadStatus(); }
+  else toast(d.error || "清除失败", true);
+}
+window.saveCred = saveCred;
+window.delCred = delCred;
+const ADAPTER_HINT = {
+  gelbooru: "site 填站点 base（如 https://safebooru.org）；tags 可用 sort:score:desc；mode 不填。",
+  moebooru: "site 填站点 base（如 https://konachan.com）；tags 可用 order:score；mode 不填。",
+  pixiv: "site / tags 不填；mode 填 daily / weekly / monthly（勿用 _r18）；需先配置 PIXIV_PROXY_HOST 才生效。",
+  rss: "site 填 RSSHub 路由完整 URL（如 https://你的域名/twitter/user/xxx）；tags / mode 不填；建议保持「可信」勾选。",
+};
+function updateSrcHint() { $("srcHint").textContent = ADAPTER_HINT[$("f_adapter").value] || ""; }
+
+async function loadSources() {
+  const d = await api("/api/sources");
+  SOURCES = d.items || [];
+  $("srcRows").innerHTML = SOURCES.map((s) => `
+    <tr>
+      <td><input type="checkbox" ${s.enabled ? "checked" : ""} onchange="toggleSource(${s.id}, this.checked)"></td>
+      <td><span class="tag">${esc(s.adapter)}</span></td>
+      <td>${esc(s.label)}</td>
+      <td class="muted">${esc(s.site || s.tags || s.mode || "")}</td>
+      <td>${s.limit}</td>
+      <td>${s.trusted ? "✓" : ""}</td>
+      <td class="row">
+        <button class="btn-sm ghost" onclick="editSource(${s.id})">编辑</button>
+        <button class="btn-sm btn-del" onclick="delSource(${s.id})">删除</button>
+      </td>
+    </tr>`).join("") || '<tr><td colspan="7" class="muted">暂无数据源</td></tr>';
+}
+function editSource(id) {
+  const s = SOURCES.find((x) => x.id === id);
+  if (!s) return;
+  $("f_id").value = s.id; $("f_adapter").value = s.adapter; $("f_label").value = s.label || "";
+  $("f_site").value = s.site || ""; $("f_tags").value = s.tags || ""; $("f_mode").value = s.mode || "";
+  $("f_limit").value = s.limit || 5; $("f_trusted").checked = !!s.trusted; $("f_enabled").checked = !!s.enabled;
+  $("srcFormTitle").textContent = "编辑数据源 #" + s.id;
+  updateSrcHint();
+}
+function resetForm() {
+  $("f_id").value = ""; $("f_label").value = ""; $("f_site").value = ""; $("f_tags").value = ""; $("f_mode").value = "";
+  $("f_limit").value = 5; $("f_trusted").checked = false; $("f_enabled").checked = true;
+  $("srcFormTitle").textContent = "新增数据源";
+}
+async function saveSource() {
+  const body = {
+    adapter: $("f_adapter").value,
+    label: $("f_label").value.trim(),
+    site: $("f_site").value.trim() || undefined,
+    tags: $("f_tags").value.trim() || undefined,
+    mode: $("f_mode").value.trim() || undefined,
+    limit: Number($("f_limit").value) || 5,
+    trusted: $("f_trusted").checked,
+    enabled: $("f_enabled").checked,
+  };
+  if ($("f_id").value) body.id = Number($("f_id").value);
+  if (!body.label) { toast("请填写名称", true); return; }
+  const d = await api("/api/sources", "POST", body);
+  if (d.ok) { toast("数据源已保存"); resetForm(); await loadSources(); } else toast(d.error || "保存失败", true);
+}
+async function toggleSource(id, enabled) {
+  const s = SOURCES.find((x) => x.id === id);
+  if (!s) return;
+  const d = await api("/api/sources", "POST", { ...s, enabled });
+  if (d.ok) { toast(`${s.label} 已${enabled ? "启用" : "停用"}`); await loadSources(); } else toast(d.error || "操作失败", true);
+}
+async function delSource(id) {
+  if (!confirm("确认删除该数据源？")) return;
+  const d = await api("/api/sources?id=" + id, "DELETE");
+  if (d.ok) { toast("已删除"); await loadSources(); } else toast(d.error || "删除失败", true);
+}
+window.editSource = editSource;
+window.delSource = delSource;
+window.toggleSource = toggleSource;
+async function loadSubscribers() {
+  const p = $("subFilter").value;
+  const d = await api("/api/subscribers?platform=" + encodeURIComponent(p));
+  $("subRows").innerHTML = (d.items || []).map((s) => `
+    <tr><td>${s.enabled ? "✅" : "⛔"}</td><td><span class="tag">${esc(s.platform)}</span></td>
+    <td>${esc(s.title)}</td><td class="muted">${esc(s.chatId)}</td><td class="muted">${fmt(s.createdAt)}</td>
+    <td><button class="btn-sm btn-del" onclick="delSub(${s.id})">删除</button></td></tr>`).join("") ||
+    '<tr><td colspan="6" class="muted">暂无订阅者</td></tr>';
+}
+async function delSub(id) {
+  if (!confirm("确认删除该订阅者？")) return;
+  const d = await api("/api/subscribers?id=" + id, "DELETE");
+  if (d.ok) { toast("已删除"); await loadSubscribers(); } else toast(d.error || "删除失败", true);
+}
+window.delSub = delSub;
+window.loadSubscribers = loadSubscribers;
+
+async function loadRuns() {
+  const d = await api("/api/runs");
+  $("runRows").innerHTML = (d.items || []).map((r) => `
+    <tr><td>${fmt(r.finishedAt || r.startedAt)}</td><td>${r.fetched}</td><td>${r.filtered}</td><td>${r.pushed}</td>
+    <td class="muted">${r.errors && r.errors.length
+      ? `<details><summary>${r.errors.length} 条</summary><div style="margin-top:6px">${r.errors.map(esc).join("<br>")}</div></details>`
+      : "-"}</td></tr>`).join("") ||
+    '<tr><td colspan="5" class="muted">暂无运行记录</td></tr>';
+}
+async function loadGallery() {
+  const d = await api("/api/recent");
+  const items = d.items || [];
+  $("empty").style.display = items.length ? "none" : "block";
+  $("gallery").innerHTML = items.map((it) => `
+    <div class="item">
+      <a href="${esc(it.pageUrl)}" target="_blank" rel="noreferrer">
+        <img loading="lazy" referrerpolicy="no-referrer" src="${esc(it.imageUrl)}" alt=""
+             onerror="this.style.opacity=.25;this.alt='无法直接加载'"></a>
+      <div class="meta"><div class="t" title="${esc(it.title)}">${esc(it.title || "(无标题)")}</div>
+        <div class="s">${esc(it.source)}${it.author ? " · " + esc(it.author) : ""}</div>
+        <div class="s">${esc((it.channels || []).join(" / "))} · ${fmt(it.pushedAt)}</div></div>
+    </div>`).join("");
+}
+async function saveConfig() {
+  const parseList = (v) => v.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
+  const d = await api("/api/config", "POST", {
+    telegram: { enabled: $("c_tg_enabled").checked, chatIds: parseList($("c_tg_chats").value), apiBase: $("c_tg_api").value.trim() || "https://api.telegram.org" },
+    napcat: { enabled: $("c_qq_enabled").checked, groupIds: parseList($("c_qq_groups").value) },
+    qqbot: { enabled: $("c_qqbot_enabled").checked, targets: parseList($("c_qqbot_targets").value) },
+    perRunTotalCap: Number($("c_cap").value) || 10,
+    seenTtlDays: Number($("c_ttl").value) || 30,
+  });
+  $("cfgMsg").innerHTML = d.ok ? '<span class="okc">设置已保存。</span>' : `<span class="err">${esc(d.error)}</span>`;
+  if (d.ok) { toast("渠道设置已保存"); await loadStatus(); }
+}
+async function runTest(target) {
+  $("testResult").innerHTML = `正在测试 ${esc(target)} …`;
+  const d = await api("/api/test?target=" + encodeURIComponent(target), "POST");
+  if (!d.ok) { $("testResult").innerHTML = `<span class="err">${esc(d.error || "测试失败")}</span>`; return; }
+  const r = d.result;
+  $("testResult").innerHTML = `<b>${esc(target)}</b>: ` +
+    (r.ok ? `<span class="okc">✅ ${esc(r.detail)}</span>` : `<span class="err">❌ ${esc(r.detail)}</span>`);
+}
+window.runTest = runTest;
+async function runNow() {
+  const btn = $("runBtn");
+  btn.disabled = true; btn.textContent = "运行中…"; $("runResult").textContent = "";
+  try {
+    const d = await api("/api/run", "POST");
+    if (!d.ok) $("runResult").innerHTML = `<span class="err">失败: ${esc(d.error)}</span>`;
+    else {
+      const s = d.summary;
+      $("runResult").innerHTML = `本次: 拉取 <b>${s.fetched}</b> · 过滤后 <b>${s.filtered}</b> · 推送 <b>${s.pushed}</b>` +
+        (s.errors && s.errors.length ? `<div class="err" style="margin-top:6px">${s.errors.slice(0, 8).map(esc).join("<br>")}</div>` : "");
+      toast(`完成：推送 ${s.pushed} 张`);
+    }
+  } catch (e) {
+    $("runResult").innerHTML = `<span class="err">${esc(String(e))}</span>`;
+  } finally {
+    btn.disabled = false; btn.textContent = "立即爬取推送";
+    await loadStatus(); await loadRuns(); await loadGallery();
+  }
+}
+async function refreshAll() {
+  await loadStatus(); await loadCreds(); await loadSources();
+  await loadSubscribers(); await loadRuns(); await loadGallery();
+}
+$("runBtn").onclick = runNow;
+$("refreshBtn").onclick = async () => { await refreshAll(); toast("已刷新"); };
+$("srcSaveBtn").onclick = saveSource;
+$("srcResetBtn").onclick = resetForm;
+$("cfgSaveBtn").onclick = saveConfig;
+$("f_adapter").onchange = updateSrcHint;
+updateSrcHint();
+refreshAll();
+</script>
+</body>
+</html>
