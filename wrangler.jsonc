@@ -13,8 +13,8 @@
   // 去重标记 / 配置 / 最近推送记录
   "kv_namespaces": [
     {
-      "binding": "KV"
-      // 省略 id：部署时由 Workers Builds 自动创建并回填（automatic resource provisioning）。
+      "binding": "KV",
+      "id": "9eec38560bcb4f4184ad96e0b2ff3b1c"
     }
   ],
   // 配置 / RSS 订阅 / 推送记录 / 运行历史
@@ -22,7 +22,7 @@
     {
       "binding": "DB",
       "database_name": "acg-db",
-      // 省略 database_id：部署时自动创建并回填。
+      "database_id": "202519a2-fac2-413d-83ea-a75045a9e1d4",
       "migrations_dir": "migrations"
     }
   ],
