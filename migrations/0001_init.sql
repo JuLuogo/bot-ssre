@@ -49,8 +49,10 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
   ('napcat',   '{"enabled":false,"groupIds":[]}'),
   ('global',   '{"perRunTotalCap":10,"seenTtlDays":30}');
 
--- 默认数据源
-INSERT INTO sources (adapter, enabled, label, site, tags, mode, limit_n, trusted, sort_order) VALUES
+-- 默认数据源（仅当 sources 表为空时写入，保证迁移可重复执行不产生重复行）
+INSERT INTO sources (adapter, enabled, label, site, tags, mode, limit_n, trusted, sort_order)
+SELECT * FROM (VALUES
   ('gelbooru', 1, 'Safebooru',  'https://safebooru.org', 'sort:score:desc', NULL,    5, 0, 1),
   ('pixiv',    1, 'Pixiv 日榜', NULL,                    NULL,              'daily', 5, 0, 2),
-  ('moebooru', 0, 'Konachan',   'https://konachan.com',  'order:score',     NULL,    5, 0, 3);
+  ('moebooru', 0, 'Konachan',   'https://konachan.com',  'order:score',     NULL,    5, 0, 3)
+) WHERE NOT EXISTS (SELECT 1 FROM sources);

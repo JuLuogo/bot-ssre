@@ -32,13 +32,23 @@ npx wrangler kv namespace create acg-kv
 ```
 把输出的 `id` 填进 `wrangler.jsonc` 的 `kv_namespaces[0].id`（替换 `REPLACE_WITH_REAL_KV_ID`）。
 
-## 4. 应用数据库迁移
+## 4. 应用数据库迁移（schema 如何"自动写入"）
+
+数据库表结构**不写在 `wrangler.jsonc` 里**（wrangler 配置不支持内嵌 SQL）。Cloudflare 的官方做法就是 `migrations/` 目录 + 配置里的 `migrations_dir` —— 这就是"配置驱动、创建时自动建表"的机制。
+
+**手动执行一次（本地 CLI）：**
 ```bash
-npx wrangler d1 migrations apply acg-db --remote
+npx wrangler d1 migrations apply acg-db --remote   # 本地开发用 --local
 ```
 会依次建表：`0001` 基础（settings/sources/pushed/runs + 默认数据源）、`0002` 订阅者、`0003` QQ 官方设置、`0004` 凭证。
 
-> 本地开发用 `--local`，两套库互不影响。
+**连 Git 自动构建时（推荐）：** 在 Workers Builds 的 **Deploy command** 里让每次部署自动同步 schema：
+```
+npx wrangler d1 migrations apply acg-db --remote && npx wrangler deploy
+```
+这样任何缺失的表都会在部署时自动补齐，新增迁移也会自动跟上。
+
+> **迁移是幂等的**：`CREATE TABLE IF NOT EXISTS`、`INSERT OR IGNORE`，且默认数据源用 `WHERE NOT EXISTS (SELECT 1 FROM sources)` 守卫——只在 sources 表为空时写入。所以上面的命令**重复执行安全，不会产生重复行**。
 
 ## 5. 设置管理口令（必须）
 ```bash
@@ -49,10 +59,21 @@ npx wrangler secret put ADMIN_TOKEN
 建议同时把 `wrangler.jsonc` 的 `vars.ENVIRONMENT` 改为 `production` 再部署。
 
 ## 6. 部署
+
+**方式一 · 本地 CLI：**
 ```bash
 npm run deploy
 ```
-部署完成后控制台会打印 Worker 地址（形如 `https://acg-rank-pusher.<你的子域>.workers.dev`）。
+
+**方式二 · 连 Git 自动构建（本项目当前采用，推荐）：** Cloudflare 面板 → Workers & Pages → Create → Workers → Connect to Git，选中仓库与 `main` 分支。Deploy command 建议设为（自动迁移 + 部署）：
+```
+npx wrangler d1 migrations apply acg-db --remote && npx wrangler deploy
+```
+之后每次 `git push` 到 `main` 自动构建部署。
+
+> 注意 `wrangler.jsonc` 的 `name` 需与面板里的 Worker 名一致（本项目为 `bot-ssre`），否则会告警并尝试开 PR 改名。
+
+部署完成后 Worker 地址形如 `https://<worker名>.<你的子域>.workers.dev`（本项目：`https://bot-ssre.juluogogo.workers.dev`）。
 
 ## 7. 在后台填其余密钥
 打开 Worker 地址（即管理后台），顶部填入刚才设置的 `ADMIN_TOKEN`，在「🔑 密钥与凭证」区按需填写并保存：
@@ -85,6 +106,11 @@ curl "https://api.telegram.org/bot<TG_BOT_TOKEN>/setWebhook" \
 返回 `{"ok":true}` 即成功。之后用户对 bot 发 `/start` 即订阅。
 
 **QQ 官方机器人**：在 QQ 开放平台 →「开发设置」→ 回调地址填 `https://<你的worker域名>/qq/webhook`，并勾选订阅事件（单聊消息、群 @ 消息、机器人加群）。保存时平台会发 `op=13` 验证请求，Worker 自动签名应答通过。
+
+**个人 QQ / NapCat（按需命令，发命令实时返图）**：在 NapCat 里开启**反向 HTTP 上报（HTTP POST）**，地址填 `https://<你的worker域名>/onebot/webhook`。
+- 建议在 NapCat 设一个 `secret`，并把同值填到凭证 `NAPCAT_WEBHOOK_SECRET`（命中命令时验签）；顺手关闭心跳上报。
+- 回图靠 Worker 主动调用，需另配 `NAPCAT_BASE_URL` / `NAPCAT_TOKEN`（公网可达的 OneBot HTTP 地址）。
+- 用法：群里 **@机器人 涩图 [关键词]**，私聊 **涩图 / /setu [关键词]**（返回全年龄安全向插画，关键词作为 booru tag）。触发词等存 `napcat_command` 配置键，默认已开启。
 
 > 回调必须是 HTTPS，端口限 80/443/8080/8443 —— workers.dev 域名默认满足。
 
