@@ -57,7 +57,7 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 
 ## 进行中：接入自有静态随机图库（randompic）
 
-**randompic 代码与迁移已提交到本地 commit `26744d9`，但该 commit 尚未推送到 origin/main；API 审核文档已补完但也有未提交改动。**
+**randompic 代码、迁移和 API 审核文档已推送到 origin/main（randompic commit `26744d9`，文档收尾 commit `b67ca7c`）；等待 Workers Builds 自动部署后做线上验证。**
 
 | 状态 | 文件 | 说明 |
 |---|---|---|
