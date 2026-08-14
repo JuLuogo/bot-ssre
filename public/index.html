@@ -114,7 +114,7 @@
     <h2 class="section-title">🖼 提示词触发返图（所有平台）</h2>
     <p class="section-desc">
       在 Telegram / QQ官方 / 个人QQ(NapCat) 里发送触发词即返图（返回全年龄安全向）。群里需 @机器人（QQ/NapCat），私聊直接触发。
-      触发词后跟空格 + 关键词可作为 booru tag，例：<code>涩图 原神</code>。
+      不带关键词时优先使用已启用的静态随机图库；触发词后跟空格 + 关键词时改用 booru tag 检索，例：<code>涩图 原神</code>。
     </p>
     <div class="form-grid">
       <label class="chk"><input type="checkbox" id="od_enabled" /> 启用</label>
@@ -142,6 +142,7 @@
           <option value="moebooru">moebooru（konachan / yande.re）</option>
           <option value="pixiv">pixiv 排行榜</option>
           <option value="rss">rss / RSSHub</option>
+          <option value="randompic">randompic（静态随机图站）</option>
         </select></label>
       <label class="f">名称 label<input type="text" id="f_label" placeholder="如 推特-画师X" /></label>
       <label class="f">site / URL<input type="text" id="f_site" placeholder="booru base 或 RSSHub 完整 URL" /></label>
@@ -326,6 +327,7 @@ const ADAPTER_HINT = {
   moebooru: "site 填站点 base（如 https://konachan.com）；tags 可用 order:score；mode 不填。",
   pixiv: "site / tags 不填；mode 填 daily / weekly / monthly（勿用 _r18）；需先配置 PIXIV_PROXY_HOST 才生效。",
   rss: "site 填 RSSHub 路由完整 URL（如 https://你的域名/twitter/user/xxx）；tags / mode 不填；建议保持「可信」勾选。",
+  randompic: "site 填静态随机图站（默认 https://pic.060730.xyz）；mode 可填 v（竖图）、h（横图）、j 或逗号组合，留空用全部。机器人读取 random.js 的实时数量，但图片始终从 site 域名取，并自动跳过不可达类型。",
 };
 function updateSrcHint() { $("srcHint").textContent = ADAPTER_HINT[$("f_adapter").value] || ""; }
 

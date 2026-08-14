@@ -62,7 +62,7 @@ npx wrangler kv namespace create acg-kv
 ```bash
 npx wrangler d1 migrations apply acg-db --remote   # 本地开发用 --local
 ```
-会依次建表：`0001` 基础（settings/sources/pushed/runs + 默认数据源）、`0002` 订阅者、`0003` QQ 官方设置、`0004` 凭证。
+会依次执行：`0001` 基础（settings/sources/pushed/runs + 默认数据源）、`0002` 订阅者、`0003` QQ 官方设置、`0004` 凭证、`0005` 自有静态随机图库。
 
 **连 Git 自动构建时（推荐）：** 在 Workers Builds 的 **Deploy command** 里让每次部署自动建库并同步 schema——**先部署、再迁移**（库是部署时才自动开通的，迁移必须排在其后）：
 ```
@@ -132,7 +132,7 @@ curl "https://api.telegram.org/bot<TG_BOT_TOKEN>/setWebhook" \
 **个人 QQ / NapCat（按需命令，发命令实时返图）**：在 NapCat 里开启**反向 HTTP 上报（HTTP POST）**，地址填 `https://<你的worker域名>/onebot/webhook`。
 - 建议在 NapCat 设一个 `secret`，并把同值填到凭证 `NAPCAT_WEBHOOK_SECRET`（命中命令时验签）；顺手关闭心跳上报。
 - 回图靠 Worker 主动调用，需另配 `NAPCAT_BASE_URL` / `NAPCAT_TOKEN`（公网可达的 OneBot HTTP 地址）。
-- 用法：群里 **@机器人 涩图 [关键词]**，私聊 **涩图 / /setu [关键词]**（返回全年龄安全向插画，关键词作为 booru tag）。触发词等存 `napcat_command` 配置键，默认已开启。
+- 用法：群里 **@机器人 + 触发词 [关键词]**，私聊发送 **触发词 [关键词]**。触发词、每次张数、群聊需 @、私聊开关都在后台「提示词触发返图」卡片配置，统一存于 `ondemand` 设置键；带关键词时作为 booru tag 查询，无关键词时优先自有随机图库。
 
 > 回调必须是 HTTPS，端口限 80/443/8080/8443 —— workers.dev 域名默认满足。
 

@@ -4,8 +4,9 @@ import { gelbooru } from "./gelbooru";
 import { pixiv } from "./pixiv";
 import { moebooru } from "./moebooru";
 import { rss } from "./rss";
+import { randompic } from "./randompic";
 
-const ADAPTERS: Record<string, SourceAdapter> = { gelbooru, pixiv, moebooru, rss };
+const ADAPTERS: Record<string, SourceAdapter> = { gelbooru, pixiv, moebooru, rss, randompic };
 
 export function getSourceAdapter(name: string): SourceAdapter | undefined {
   return ADAPTERS[name];

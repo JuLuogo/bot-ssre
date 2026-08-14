@@ -61,12 +61,12 @@ export interface ChannelAdapter {
 /** 单个数据源的运行配置 */
 export interface SourceConfig {
   id?: number; // D1 主键（新增时无）
-  adapter: "gelbooru" | "moebooru" | "pixiv" | "rss";
+  adapter: "gelbooru" | "moebooru" | "pixiv" | "rss" | "randompic";
   enabled: boolean;
   label: string; // 展示名
-  site?: string; // booru 站点 base url，或 RSSHub 路由完整 URL
+  site?: string; // booru base / RSSHub URL / randompic 站点根地址
   tags?: string; // booru 查询标签（不含 rating，rating 由过滤器统一处理）
-  mode?: string; // pixiv 榜单模式
+  mode?: string; // pixiv 榜单模式；randompic 图片类型（如 v,h,j）
   limit: number; // 每次取前 N 条
   trusted?: boolean; // 可信来源，跳过全年龄过滤（RSS 订阅默认 true）
   sortOrder?: number;

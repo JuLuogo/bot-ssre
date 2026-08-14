@@ -70,12 +70,43 @@ function booruQuery(adapter: Booru["adapter"], tags: string): string {
   return adapter === "moebooru" ? `${t} rating:s order:random`.trim() : `${t} rating:safe sort:random`.trim();
 }
 
+function dedupeShuffle(pool: Illust[], want: number): Illust[] {
+  const seen = new Set<string>();
+  const uniq: Illust[] = [];
+  for (const it of pool.sort(() => Math.random() - 0.5)) {
+    const k = `${it.source}:${it.id}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      uniq.push(it);
+    }
+  }
+  return uniq.slice(0, want);
+}
+
 /**
- * 抓取 N 张全年龄插画（随机、去重、打乱）。优先用后台已启用的 booru 源，
- * 没有则回退 safebooru。始终经 isAllAges 二次过滤，只返回 rating:safe。
+ * 抓取 N 张全年龄插画（随机、去重、打乱）。
+ * 无关键词时优先用静态随机图源（如用户自建 pic 站，原生随机、内容自证安全）；
+ * 有关键词或无随机图源时走 booru（支持按 tag 检索），并经 isAllAges 只留 rating:safe。
  */
 export async function fetchRandomIllusts(env: Env, tags: string, count: number): Promise<Illust[]> {
   const cfg = await getConfig(env);
+  const want = Math.max(1, count);
+
+  // 1) 无关键词：优先静态随机图源
+  if (!tags.trim()) {
+    const rp = cfg.sources.find((s) => s.enabled && s.adapter === "randompic");
+    if (rp) {
+      const adapter = getSourceAdapter("randompic");
+      try {
+        const items = (await adapter?.fetchRanking(env, { limit: want, site: rp.site, mode: rp.mode, label: rp.label })) ?? [];
+        if (items.length > 0) return dedupeShuffle(items, want);
+      } catch {
+        // 回退 booru
+      }
+    }
+  }
+
+  // 2) booru 随机（支持 tag）
   const enabled: Booru[] = cfg.sources
     .filter((s) => s.enabled && (s.adapter === "gelbooru" || s.adapter === "moebooru"))
     .map((s) => ({ adapter: s.adapter as Booru["adapter"], site: s.site, label: s.label }));
@@ -83,11 +114,8 @@ export async function fetchRandomIllusts(env: Env, tags: string, count: number):
   const candidates: Booru[] =
     enabled.length > 0 ? enabled : [{ adapter: "gelbooru", site: "https://safebooru.org", label: "safebooru" }];
 
-  const want = Math.max(1, count);
   const perFetch = Math.min(100, Math.max(want * 3, 40));
   const pool: Illust[] = [];
-
-  // 随机打乱源顺序，避免总命中同一个
   for (const s of candidates.sort(() => Math.random() - 0.5)) {
     const adapter = getSourceAdapter(s.adapter);
     if (!adapter) continue;
@@ -104,18 +132,7 @@ export async function fetchRandomIllusts(env: Env, tags: string, count: number):
     }
     if (pool.length >= want * 3) break;
   }
-
-  // 去重(按 source:id) + 打乱 + 取前 want
-  const seen = new Set<string>();
-  const uniq: Illust[] = [];
-  for (const it of pool.sort(() => Math.random() - 0.5)) {
-    const k = `${it.source}:${it.id}`;
-    if (!seen.has(k)) {
-      seen.add(k);
-      uniq.push(it);
-    }
-  }
-  return uniq.slice(0, want);
+  return dedupeShuffle(pool, want);
 }
 
 /** 抓取一张全年龄插画（按需命令用）。 */
