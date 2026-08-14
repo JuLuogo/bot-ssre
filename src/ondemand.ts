@@ -43,10 +43,10 @@ function booruQuery(adapter: Booru["adapter"], tags: string): string {
 }
 
 /**
- * 抓取一张全年龄插画。优先用后台已启用的 booru 源（支持按 tag 检索），
- * 没有则回退到 safebooru。始终经 isAllAges 二次过滤，只返回 rating:safe。
+ * 抓取 N 张全年龄插画（随机、去重、打乱）。优先用后台已启用的 booru 源，
+ * 没有则回退 safebooru。始终经 isAllAges 二次过滤，只返回 rating:safe。
  */
-export async function fetchOneIllust(env: Env, tags: string, limit = DEFAULT_ONDEMAND.fetchLimit): Promise<Illust | null> {
+export async function fetchRandomIllusts(env: Env, tags: string, count: number): Promise<Illust[]> {
   const cfg = await getConfig(env);
   const enabled: Booru[] = cfg.sources
     .filter((s) => s.enabled && (s.adapter === "gelbooru" || s.adapter === "moebooru"))
@@ -55,22 +55,43 @@ export async function fetchOneIllust(env: Env, tags: string, limit = DEFAULT_OND
   const candidates: Booru[] =
     enabled.length > 0 ? enabled : [{ adapter: "gelbooru", site: "https://safebooru.org", label: "safebooru" }];
 
+  const want = Math.max(1, count);
+  const perFetch = Math.min(100, Math.max(want * 3, 40));
+  const pool: Illust[] = [];
+
   // 随机打乱源顺序，避免总命中同一个
   for (const s of candidates.sort(() => Math.random() - 0.5)) {
     const adapter = getSourceAdapter(s.adapter);
     if (!adapter) continue;
     try {
       const items = await adapter.fetchRanking(env, {
-        limit,
+        limit: perFetch,
         tags: booruQuery(s.adapter, tags),
         site: s.site,
         label: s.label,
       });
-      const safe = items.filter(isAllAges);
-      if (safe.length > 0) return safe[Math.floor(Math.random() * safe.length)];
+      pool.push(...items.filter(isAllAges));
     } catch {
       // 换下一个源
     }
+    if (pool.length >= want * 3) break;
   }
-  return null;
+
+  // 去重(按 source:id) + 打乱 + 取前 want
+  const seen = new Set<string>();
+  const uniq: Illust[] = [];
+  for (const it of pool.sort(() => Math.random() - 0.5)) {
+    const k = `${it.source}:${it.id}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      uniq.push(it);
+    }
+  }
+  return uniq.slice(0, want);
+}
+
+/** 抓取一张全年龄插画（按需命令用）。 */
+export async function fetchOneIllust(env: Env, tags: string): Promise<Illust | null> {
+  const arr = await fetchRandomIllusts(env, tags, 1);
+  return arr[0] ?? null;
 }

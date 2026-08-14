@@ -60,6 +60,8 @@
     <span class="muted" id="envTag"></span>
     <button class="ghost btn-sm" id="refreshBtn">刷新</button>
     <button id="runBtn">立即爬取推送</button>
+    <input type="number" id="randCount" value="5" min="1" max="20" title="随机推送张数" style="width:60px" />
+    <button id="randBtn">推送随机新图</button>
     <button class="ghost btn-sm" id="logoutBtn">登出</button>
   </div>
 </header>
@@ -455,7 +457,20 @@ async function refreshAll() {
   await loadStatus(); await loadCreds(); await loadSources();
   await loadSubscribers(); await loadRuns(); await loadGallery();
 }
+async function runRandom() {
+  const n = Math.max(1, Math.min(20, Number($("randCount").value) || 5));
+  const btn = $("randBtn"); btn.disabled = true; const old = btn.textContent; btn.textContent = "推送中…";
+  try {
+    const d = await api("/api/push-random?count=" + n, "POST");
+    if (!d.ok) { toast(d.error || "推送失败", true); return; }
+    const s = d.summary;
+    toast(`随机推送完成：成功 ${s.pushed}/${s.fetched} 张` + (s.errors && s.errors.length ? `（${s.errors.length} 条错误）` : ""));
+  } catch (e) { toast(String(e), true); }
+  finally { btn.disabled = false; btn.textContent = old; await loadRuns(); await loadGallery(); }
+}
+window.runRandom = runRandom;
 $("runBtn").onclick = runNow;
+$("randBtn").onclick = runRandom;
 $("refreshBtn").onclick = async () => { await refreshAll(); toast("已刷新"); };
 $("logoutBtn").onclick = async () => { try { await api("/api/logout", "POST"); } finally { location.reload(); } };
 $("srcSaveBtn").onclick = saveSource;

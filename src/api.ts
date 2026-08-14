@@ -1,6 +1,6 @@
 // HTTP API：状态 / 推送记录 / 运行历史 / 手动触发 / 配置 / 数据源 / 订阅者 / 凭证 / 连通性自检。
 import type { AppConfig, Env, SourceConfig } from "./types";
-import { runOnce } from "./pipeline";
+import { runOnce, pushRandomBatch } from "./pipeline";
 import { getConfig, saveConfig } from "./config";
 import {
   listRecent,
@@ -132,6 +132,12 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
 
   if (pathname === "/api/run" && method === "POST") {
     return json({ ok: true, summary: await runOnce(await resolveEnv(env)) });
+  }
+
+  // 手动随机推送：随机取 count 张(默认5,上限20)全年龄图，不去重强制推
+  if (pathname === "/api/push-random" && method === "POST") {
+    const n = Math.max(1, Math.min(20, Number(url.searchParams.get("count")) || 5));
+    return json({ ok: true, summary: await pushRandomBatch(await resolveEnv(env), n) });
   }
 
   // 连通性自检

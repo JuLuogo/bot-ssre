@@ -112,7 +112,7 @@ export async function handleOneBotWebhook(request: Request, env: Env): Promise<R
   const groupId = String(ev.group_id ?? "");
   const userId = String(ev.user_id ?? "");
   try {
-    const illust = await fetchOneIllust(renv, tags, od.fetchLimit);
+    const illust = await fetchOneIllust(renv, tags);
     if (!illust) {
       const tip = tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试";
       if (isGroup) await sendGroupText(renv, groupId, tip);
