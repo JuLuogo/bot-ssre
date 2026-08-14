@@ -1,5 +1,5 @@
 // 按需抓图（OneBot 命令用）：与运行时解耦的纯逻辑，便于日后移植到 VPS/Docker。
-// 配置存独立 settings key `napcat_command`，不会被后台保存 napcat 渠道配置时覆盖。
+// 配置存 settings key `ondemand`，由所有平台的提示词触发返图共用。
 import type { Env, Illust } from "./types";
 import { getConfig } from "./config";
 import { getSourceAdapter } from "./sources";

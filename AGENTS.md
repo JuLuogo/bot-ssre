@@ -57,7 +57,7 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 
 ## 进行中：接入自有静态随机图库（randompic）
 
-**代码已就绪、已通过本地验证，但尚未 commit/push/部署：**
+**randompic 代码与迁移已提交到本地 commit `26744d9`，但该 commit 尚未推送到 origin/main；API 审核文档已补完但也有未提交改动。**
 
 | 状态 | 文件 | 说明 |
 |---|---|---|
@@ -68,7 +68,7 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 | 修改 ✅ | `src/ondemand.ts` | `fetchRandomIllusts` 无关键词时优先 randompic，带关键词回退 booru |
 | 修改 ✅ | `public/index.html` | 下拉加 randompic 选项 + hint |
 | 修改 ✅ | `docs/DEPLOYMENT.md` / `.gitignore` | 文档与忽略 `.serena/` |
-| 新增 ⚠️ | `docs/RANDOM_IMAGE_APIS.md` | **只完成 1~2 节（推荐池 14 项 + 自有图库），43 行处留有 `<!-- MORE -->`，第 3/4/5 节（中文圈待审/国际候选/失效清单）未写** |
+| 新增 ✅ | `docs/RANDOM_IMAGE_APIS.md` | 已补完 7 节、共 50 个候选/实测项，并区分推荐、待审、候选、失效，不会自动启用第三方源 |
 
 **本地验证结果（可信）：**
 - `npx tsc --noEmit` ✅ EXIT:0
@@ -81,14 +81,14 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 - 自有图库已确认 **100% 全年龄**，适配器标 `rating: "safe"`，无需再过滤。
 
 ## 待办（下次开工按序执行）
-1. 补完 `docs/RANDOM_IMAGE_APIS.md` 第 3~5 节（中文圈待审、国际候选、失效清单）。
-2. `git add` 全部改动 → commit（feat(randompic)）→ `git push origin main`。
-3. 等 Workers Builds 构建，用 `cloudflare-builds` MCP 确认 success。
-4. 远程 D1 迁移：因 Deploy command 是「先部署再迁移」，`0005` 会自动应用（幂等，安全）。
-5. 部署后线上验证：后台 → 数据源出现「自有随机图库」；点「推送随机新图」/ 私聊发触发词 → 应收到 `pic.060730.xyz` 的图。
-6. 可选：把 randompic 也加入「立即爬取推送」的默认运行（当前默认只走排行榜 booru 源，随机图源只在无关键词提示词/随机推送时被优先使用）。
+1. `npx tsc --noEmit` + `npx wrangler deploy --dry-run` 做最终校验。
+2. 提交文档收尾改动，然后 `git push origin main`（会同时推送 ahead 的 `26744d9`）。
+3. 等 Workers Builds 构建；若 builds MCP 不在线，用 Git 状态/Cloudflare 面板确认。
+4. 远程 D1 迁移：Deploy command 为「先部署再迁移」，`0005` 会自动应用（幂等，安全）。
+5. 部署后线上验证：后台出现「自有随机图库」；点「推送随机新图」/ 私聊发触发词，应收到 `pic.060730.xyz` 图片。
+6. 可选：审核 `docs/RANDOM_IMAGE_APIS.md` 后，再决定添加哪个第三方备用源；默认不会自动启用。
 
 ## 环境/账号备注（2026-08-14）
 - Worker：`bot-ssre`；后台 `https://bot-ssre.juluogogo.workers.dev`（或 `https://bot-ces.060730.xyz`）。
-- Cloudflare MCP 本会话可用（bindings/builds/observability）。
-- 队列里的 3 个任务 #25/#26/#27 均 in_progress，对应本节的 randompic 接入、API 审核清单、验证部署。
+- 本会话 `cloudflare-builds` / `cloudflare-observability` MCP 当前断开；`cloudflare-bindings` 仍可用。
+- 当前分支 `main` 比 `origin/main` ahead 1（`26744d9`），另有文档/AGENTS 未提交改动。

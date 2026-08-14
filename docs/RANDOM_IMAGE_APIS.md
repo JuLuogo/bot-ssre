@@ -40,4 +40,81 @@
 | 13 | nekos.dev | `https://api.nekos.dev/api/v3/images/sfw/img/neko` | JSON | SFW 路径 | 实测 200；文档较弱 |
 | 14 | nekos.life | `https://nekos.life/api/v2/img/neko` | JSON | 分类式 | 实测 200；旧项目，低优先级 |
 
-<!-- MORE -->
+## 3. 中文圈：实测可达，但接入前需人工抽样内容
+
+| # | 服务 | 端点 | 返回 | 当前判断 |
+|---:|---|---|---|---|
+| 15 | [LoliAPI ACG](https://docs.loliapi.com/api-shi-yong-wen-dang/sui-ji-er-ci-yuan-tu-pian) | `https://www.loliapi.com/acg/` | 302 → WebP | 实测 200；未见严格全年龄承诺 |
+| 16 | LoliAPI 背景图 | `https://www.loliapi.com/bg/` | 302 → WebP | 实测 200；背景图库，分级未明确 |
+| 17 | [栗次元萌图](https://t.alcy.cc/) | `https://t.alcy.cc/moe/` | WebP | 实测 200；官方未声明严格 SFW |
+| 18 | 栗次元竖图 | `https://t.alcy.cc/mp/` | WebP | 实测 200；适合手机/聊天场景 |
+| 19 | 栗次元原神 | `https://t.alcy.cc/ycy/` | WebP | 实测 200；主题明确，仍需抽样 |
+| 20 | Jitsu | `https://moe.jitsu.top/img/` | 302 → JPEG | 实测 200；无可靠分级说明 |
+| 21 | ANOSU 兼容入口 | `https://api.anosu.top/img` | 301 → Jitsu | 实测 200；与 Jitsu 重复，不建议同时接 |
+| 22 | mtyqx | `https://api.mtyqx.cn/api/random.php` | JPEG | 实测 200；文档、规模、分级未确认 |
+| 23 | 杜锦随机图 | `https://api.dujin.org/pic/` | 302 → JPEG | 实测 200；源图常经新浪/百度，分级未知 |
+| 24 | Paugram 壁纸 | `https://api.paugram.com/wallpaper/` | 302 → JPEG | 实测 200；壁纸类，未承诺全年龄 |
+| 25 | pic.re 国内可达入口 | `https://pic.re/image` | WebP | 实测 200；已列推荐池，官方明确 SFW |
+
+## 4. 中文圈：有作者/官方资料，尚待逐项复测
+
+| # | 服务 | 资料/可能端点 | 待确认事项 |
+|---:|---|---|---|
+| 26 | [夜轻随机图](https://blog.yeqing.net/acg-api/) | 文档列 `api.php`、`pc.php`、`pe.php`，支持 `return=json/all` | 取文档当前域名复测；核对限流与内容样本 |
+| 27 | [MoeRNG](https://github.com/Grabrun/MoeRNG) | 自建型随机图 API，JSON/302、多分类 | 这是程序而非公共稳定实例，适合自部署 |
+| 28 | [鸡屎 API](https://api-doc.jsms2.cn/) | 随机/方形/横/竖/UA 自适应接口 | 当前端点、内容分级、图库规模需确认 |
+| 29 | [欧阳琪琪 v2](https://api.ouyangqiqi.cn/dm/v2%E7%89%88%E6%9C%AC/%E8%B0%83%E7%94%A8%E4%B8%8E%E5%8F%82%E6%95%B0/) | 文档称可用无序参数减少缓存重复 | 端点连通性与图片域名稳定性待测 |
+| 30 | [Sitetu](https://www.sitetu.cn/api) | 随机图、列表、搜索、标签接口 | 官方页可达；具体端点与分级需确认 |
+| 31 | [南风 API](https://api.sretna.cn/) | 随机动漫图接口 | 免费宣称；规模、限流、分级待核 |
+| 32 | [梓宸 ACG API](https://app.zichen.zone/api/acg/) | 随机 ACG 图片 | 公益服务，需确认端点与防滥用规则 |
+| 33 | [Elaina Cat](https://api.elaina.cat/) | 自适应/横屏/竖屏 | 内容分级、规模和稳定性待核 |
+| 34 | Cirno AniPic | `https://api.cirno.me/anipic` | 官方介绍可查；返回格式和分级待测 |
+| 35 | Cirno AniBG | `https://api.cirno.me/anibg` | 官方介绍可查；返回格式和分级待测 |
+
+## 5. 国际候选与备用源
+
+| # | 服务 | 端点/用途 | 状态与风险 |
+|---:|---|---|---|
+| 36 | Nekos API 文件端点 | `https://api.nekosapi.com/v4/images/random/file?rating=safe` | 实测 302 → WebP；推荐备用 |
+| 37 | yande.re | `https://yande.re/post.json?limit=40&tags=rating:s+order:random` | 实测 JSON；必须 rating:s 并本地复核 |
+| 38 | Zerochan | `https://www.zerochan.net/{tag}?json` | 实测 JSON；无可靠 rating 参数，60 req/min |
+| 39 | Waifu.it | [文档](https://docs.waifu.it/rest-api/Images/Waifu/search) · `/api/v4/waifu` | 官方文档可用；需要 Authorization token |
+| 40 | OtakuGIFs | [官网](https://otakugifs.xyz/) | Reaction GIF API；适合动作回复，不是静态插画主源 |
+| 41 | Kawaii.red | [文档](https://docs.kawaii.red/request-structure) | Reaction GIF；需要免费 token，分级需审核 |
+| 42 | Danbooru | [API 文档](https://danbooru.donmai.us/wiki_pages/help:api) | 大型图库；需唯一 UA、限流约束和 rating:general |
+| 43 | Konachan.net | `https://konachan.net/post.json?limit=40&tags=order:random` | SFW 站点；不要使用 `.com` |
+| 44 | PurrBot | [文档](https://docs.purrbot.site/api) | SFW/NSFW 路径分离；偏 reaction/neko |
+| 45 | nekos.dev | `/api/v3/images/sfw/img/neko` | SFW 路径；文档较弱，低优先级 |
+| 46 | nekos.life | `/api/v2/img/neko` | 实测 JSON；项目维护度较低 |
+| 47 | Lorem Picsum | [文档](https://picsum.photos/) · `https://picsum.photos/800/1200?random=1` | 实测图片；通用摄影，不是二次元 |
+| 48 | Unsplash | [API 文档](https://unsplash.com/documentation/#get-a-random-photo) | 需要 Access Key，须遵守 hotlink/署名规则 |
+| 49 | Pexels | [API 文档](https://www.pexels.com/api/) | 需要 API key；无专用随机端点，需搜索后随机 |
+| 50 | SourceSplash | [官网](https://www.sourcesplash.com/) | 通用图片聚合；免费额度和内容授权需审核 |
+
+## 6. 失效、不建议或不符合当前约束
+
+| 服务 | 结果 | 原因 |
+|---|---|---|
+| waifu.pics | 失效 | API 子域 DNS 不可用，主站跳转到其他站点 |
+| Gelbooru | 暂不接 | 无凭证请求实测 401，需要 user_id + api_key；且含成人内容 |
+| Rule34 | 不接 | R18-only，不符合当前项目全年龄约束 |
+| Konachan.com | 不接 | 含成人内容；仅考虑 Konachan.net |
+| BTSTU | 本轮超时 | HTTP 000，无法确认稳定性 |
+| VVHan | 本轮超时 | HTTP 000，无法确认稳定性 |
+| SEOVX | 本轮超时 | HTTP 000，无法确认稳定性 |
+| toubiec | 本轮超时 | HTTP 000，无法确认稳定性 |
+| ixiaowai | 本轮超时 | HTTP 000，无法确认稳定性 |
+| iw233 | 本轮超时 | HTTP 000，无法确认稳定性 |
+| Oick | 404 | 旧端点失效 |
+| loliapi `/pc/` | 404 | 应使用当前文档中的 `/acg/` 或 `/bg/` |
+| mwm.moe `/pc` | 兼容跳转 | 实际跳到 alcy，不应重复接入 |
+
+## 7. 建议审核顺序
+
+1. **先用自有图库**：已确认全年龄；`randompic` 已接入，默认优先，且不依赖第三方 key。
+2. **第一外部备用**：`pic.re`，官方明确 SFW，接口简单、直接返回 WebP。
+3. **需要 tag 检索**：优先现有 Safebooru；其次 Lolicon（固定 `r18=0`，但图片域可能需要代理）。
+4. **需要大图库**：Nekos API、Danbooru、Konachan.net；逐图过滤/限流后再启用。
+5. **LoliAPI、栗次元、Jitsu、mtyqx、杜锦**：虽然本轮能返回图片，但先人工抽样，再决定是否接入生产。
+
+本清单只用于审核，不会自动把第三方服务加入默认数据源。

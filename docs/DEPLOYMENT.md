@@ -76,7 +76,7 @@ npx wrangler deploy && npx wrangler d1 migrations apply acg-db --remote
 ```bash
 npx wrangler secret put ADMIN_TOKEN
 ```
-这是保护 `/api` 写操作的唯一凭证，**不能**在后台配置（避免自我提权）。生产环境未设置时，`ENVIRONMENT=production` 会拒绝所有写操作。
+这是保护整个管理后台（页面 + 所有 `/api` 读写）的登录口令，**不能**在后台配置（避免自我提权）。未设置时后台 fail-closed：只能看到登录页且无法读取或修改数据。
 
 建议同时把 `wrangler.jsonc` 的 `vars.ENVIRONMENT` 改为 `production` 再部署。
 
