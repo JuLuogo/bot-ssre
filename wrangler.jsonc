@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "acg-rank-pusher",
+  "name": "bot-ssre",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
   "observability": {
@@ -13,10 +13,8 @@
   // 去重标记 / 配置 / 最近推送记录
   "kv_namespaces": [
     {
-      "binding": "KV",
-      // 部署前用 `npx wrangler kv namespace create acg-kv` 创建后把 id 填到这里。
-      // 本地 `wrangler dev` 用内置模拟存储，无需真实 id。
-      "id": "REPLACE_WITH_REAL_KV_ID"
+      "binding": "KV"
+      // 省略 id：部署时由 Workers Builds 自动创建并回填（automatic resource provisioning）。
     }
   ],
   // 配置 / RSS 订阅 / 推送记录 / 运行历史
@@ -24,9 +22,7 @@
     {
       "binding": "DB",
       "database_name": "acg-db",
-      // 部署前用 `npx wrangler d1 create acg-db` 创建后把 database_id 填到这里。
-      // 本地 dev 用内置 SQLite 模拟，无需真实 id。
-      "database_id": "REPLACE_WITH_REAL_D1_ID",
+      // 省略 database_id：部署时自动创建并回填。
       "migrations_dir": "migrations"
     }
   ],
@@ -34,7 +30,7 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/tg/*", "/qq/*", "/__scheduled"]
+    "run_worker_first": ["/api/*", "/tg/*", "/qq/*", "/onebot/*", "/__scheduled"]
   },
   // 非敏感变量。敏感项（TG_BOT_TOKEN / NAPCAT_* / ADMIN_TOKEN）用 `wrangler secret put` 设置。
   "vars": {

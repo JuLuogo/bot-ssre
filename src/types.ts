@@ -14,6 +14,7 @@ export interface Env {
   TG_WEBHOOK_SECRET?: string;
   QQ_BOT_APPID?: string;
   QQ_BOT_SECRET?: string;
+  NAPCAT_WEBHOOK_SECRET?: string; // OneBot HTTP 上报验签密钥（校验 X-Signature）
 }
 
 export type Rating = "safe" | "questionable" | "explicit" | "unknown";

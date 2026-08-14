@@ -14,6 +14,10 @@ TG_WEBHOOK_SECRET=""
 NAPCAT_BASE_URL=""
 NAPCAT_TOKEN=""
 
+# NapCat OneBot 上报(反向 HTTP POST)验签密钥：与 NapCat 配置里的 secret 一致。
+# 用于校验发往 /onebot/webhook 的事件签名(X-Signature: sha1=...)。留空则不验签。
+NAPCAT_WEBHOOK_SECRET=""
+
 # QQ 官方机器人（QQ 开放平台）：机器人 ID(AppID) 与机器人密钥(AppSecret)
 QQ_BOT_APPID=""
 QQ_BOT_SECRET=""

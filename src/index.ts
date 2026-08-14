@@ -4,6 +4,7 @@ import { runOnce } from "./pipeline";
 import { handleApi } from "./api";
 import { handleTelegramWebhook } from "./telegram_bot";
 import { handleQQBotWebhook } from "./qqbot_webhook";
+import { handleOneBotWebhook } from "./onebot_webhook";
 import { alreadyExecuted } from "./store";
 import { resolveEnv } from "./creds";
 
@@ -16,6 +17,10 @@ export default {
     }
     if (url.pathname === "/qq/webhook" && request.method === "POST") {
       return handleQQBotWebhook(request, await resolveEnv(env));
+    }
+    // OneBot(NapCat) 上报：传原始 env，命中命令后内部再 resolveEnv，非命令消息不触碰 D1
+    if (url.pathname === "/onebot/webhook" && request.method === "POST") {
+      return handleOneBotWebhook(request, env);
     }
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
     return env.ASSETS.fetch(request);
