@@ -17,7 +17,8 @@ export default {
       return handleTelegramWebhook(request, await resolveEnv(env));
     }
     if (url.pathname === "/qq/webhook" && request.method === "POST") {
-      return handleQQBotWebhook(request, await resolveEnv(env));
+      // 传原始 env：op=13 校验走快路径（优先 Worker Secret，不读 D1），事件再在内部 resolveEnv
+      return handleQQBotWebhook(request, env);
     }
     // OneBot(NapCat) 上报：传原始 env，命中命令后内部再 resolveEnv，非命令消息不触碰 D1
     if (url.pathname === "/onebot/webhook" && request.method === "POST") {

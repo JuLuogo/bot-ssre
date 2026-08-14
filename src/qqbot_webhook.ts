@@ -3,6 +3,7 @@ import type { Env } from "./types";
 import { subscribe, unsubscribe } from "./db";
 import { sendText } from "./channels/qqbot";
 import { signQQValidation, verifyQQSignature } from "./qqsign";
+import { resolveEnv } from "./creds";
 
 interface QQPayload {
   op?: number;
@@ -15,9 +16,6 @@ const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
 export async function handleQQBotWebhook(request: Request, env: Env): Promise<Response> {
-  const secret = env.QQ_BOT_SECRET;
-  if (!secret) return new Response("QQ_BOT_SECRET 未配置", { status: 503 });
-
   const raw = await request.text();
   let payload: QQPayload;
   try {
@@ -26,14 +24,20 @@ export async function handleQQBotWebhook(request: Request, env: Env): Promise<Re
     return new Response("bad json", { status: 400 });
   }
 
-  // op=13：回调地址验证（用 AppSecret 派生私钥签 event_ts + plain_token）
+  // op=13：回调地址验证。尽量快地应答——优先用 Worker Secret(env)里的 QQ_BOT_SECRET，
+  // 避免跨区域 D1 读取，把响应时间压到最低；在跨境弱网下让响应尽量先于连接被重置返回。
   if (payload.op === 13) {
+    const secret = env.QQ_BOT_SECRET || (await resolveEnv(env)).QQ_BOT_SECRET;
+    if (!secret) return new Response("QQ_BOT_SECRET 未配置", { status: 503 });
     const d = (payload.d ?? {}) as { plain_token?: string; event_ts?: string };
     if (!d.plain_token || !d.event_ts) return new Response("bad validation payload", { status: 400 });
     return json({ plain_token: d.plain_token, signature: await signQQValidation(secret, d.event_ts, d.plain_token) });
   }
 
-  // 事件推送：校验 Ed25519 签名
+  // 事件推送：合并 D1 凭证（发送/验签需要），再校验 Ed25519 签名
+  const renv = await resolveEnv(env);
+  const secret = renv.QQ_BOT_SECRET;
+  if (!secret) return new Response("QQ_BOT_SECRET 未配置", { status: 503 });
   const sigHex = request.headers.get("X-Signature-Ed25519") || "";
   const ts = request.headers.get("X-Signature-Timestamp") || "";
   if (!(await verifyQQSignature(secret, sigHex, ts, raw))) {
@@ -56,7 +60,7 @@ export async function handleQQBotWebhook(request: Request, env: Env): Promise<Re
 
   // 机器人被加入群 / 被添加：自动订阅
   if (t === "GROUP_ADD_ROBOT" || t === "FRIEND_ADD") {
-    await subscribe(env, "qqbot", target, title);
+    await subscribe(renv, "qqbot", target, title);
     return json({});
   }
 
@@ -66,15 +70,15 @@ export async function handleQQBotWebhook(request: Request, env: Env): Promise<Re
     const first = content.split(/\s+/).filter(Boolean)[0]?.toLowerCase() ?? "";
 
     if (first === "/start" || first === "/subscribe" || content === "订阅") {
-      await subscribe(env, "qqbot", target, title);
-      await sendText(env, target, "✅ 已订阅插画推送。发送 /stop 可随时退订。", msgId);
+      await subscribe(renv, "qqbot", target, title);
+      await sendText(renv, target, "✅ 已订阅插画推送。发送 /stop 可随时退订。", msgId);
     } else if (first === "/stop" || first === "/unsubscribe" || content === "退订") {
-      await unsubscribe(env, "qqbot", target);
-      await sendText(env, target, "已退订。发送 /start 可重新订阅。", msgId);
+      await unsubscribe(renv, "qqbot", target);
+      await sendText(renv, target, "已退订。发送 /start 可重新订阅。", msgId);
     } else if (first === "/status") {
-      await sendText(env, target, "机器人在线。命令：/start 订阅 · /stop 退订 · /status 状态。", msgId);
+      await sendText(renv, target, "机器人在线。命令：/start 订阅 · /stop 退订 · /status 状态。", msgId);
     } else {
-      await sendText(env, target, "可用命令：/start 订阅 · /stop 退订 · /status 状态。", msgId);
+      await sendText(renv, target, "可用命令：/start 订阅 · /stop 退订 · /status 状态。", msgId);
     }
   }
   return json({});
