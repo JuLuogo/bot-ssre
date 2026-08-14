@@ -5,6 +5,28 @@
 - Cloudflare 账号（免费版足够；D1 + KV + Workers + Cron 都在免费额度内）
 - 首次使用需登录：`npx wrangler login`
 - 可选：Telegram Bot（@BotFather）、QQ 开放平台机器人、自建 RSSHub、i.pximg 反代、自建 NapCat
+- 仅"本地 CLI 部署"方式需要 `npx wrangler login`；"连 Git 部署"不需要。
+
+---
+
+## 快速部署 · 连 Git 到新账号（推荐，KV/D1 与建表全自动）
+
+连接 Git 仓库即可，附属资源（KV/D1）和数据库表都会在部署时自动创建，换任何账号都不用改配置。
+
+1. **准备仓库**：把本仓库放到你的 GitHub/GitLab。
+2. **面板连 Git**：Cloudflare 面板 → Workers & Pages → Create → Workers → **Connect to Git**，选中仓库与 `main` 分支。
+3. **设置 Deploy command（关键，决定表能否自动建）**：改成 **先部署、再迁移**——
+   ```
+   npx wrangler deploy && npx wrangler d1 migrations apply acg-db --remote
+   ```
+   > ⚠️ 顺序不能反：库是在 `wrangler deploy` 过程中才被"自动开通"创建的，迁移必须排在它后面，否则库还没建就迁移会失败。
+4. **保存并部署**。首次构建会依次：自动创建 KV + D1 `acg-db` → 部署 Worker → 跑迁移建好 6 张表。之后每次 `git push` 到 `main` 自动重部署。
+5. **补密钥/变量（手动，按需）**：`ADMIN_TOKEN`（见 §5）、各渠道密钥（§7）、webhook 地址（§8）。这些是密钥/实例数据，不随仓库自动化，每个账号单独设。
+
+> `wrangler.jsonc` 已**省略 KV/D1 的 id**，靠 automatic resource provisioning 在任意账号自动开通，所以换账号无需改配置。
+> 若面板里的 Worker 名与 `wrangler.jsonc` 的 `name`（`bot-ssre`）不一致会告警，改成一致即可。
+
+下面 §1–§6 是"本地 CLI 部署"（方式 B）的分步说明；已用上面的连 Git 方式可跳到 §7 配置密钥。
 
 ---
 
@@ -13,24 +35,24 @@
 npm install
 ```
 
-## 2. 创建 D1 数据库
+## 2. 创建 D1 数据库（仅本地 CLI 方式；连 Git 会自动创建，可跳过）
 ```bash
 npx wrangler d1 create acg-db
 ```
-输出里会给出 `database_id`，把它填进 `wrangler.jsonc`：
+输出里会给出 `database_id`。**连 Git 自动开通时不要填 id**（保持省略）；仅本地 CLI 方式才把它填进 `wrangler.jsonc`：
 ```jsonc
 "d1_databases": [
   { "binding": "DB", "database_name": "acg-db",
-    "database_id": "把这里换成上面输出的 id",   // ← 替换 REPLACE_WITH_REAL_D1_ID
+    "database_id": "把这里换成上面输出的 id",
     "migrations_dir": "migrations" }
 ]
 ```
 
-## 3. 创建 KV 命名空间
+## 3. 创建 KV 命名空间（仅本地 CLI 方式；连 Git 会自动创建，可跳过）
 ```bash
 npx wrangler kv namespace create acg-kv
 ```
-把输出的 `id` 填进 `wrangler.jsonc` 的 `kv_namespaces[0].id`（替换 `REPLACE_WITH_REAL_KV_ID`）。
+仅本地 CLI 方式把输出的 `id` 填进 `wrangler.jsonc` 的 `kv_namespaces[0].id`；连 Git 自动开通时保持省略。
 
 ## 4. 应用数据库迁移（schema 如何"自动写入"）
 
@@ -42,9 +64,9 @@ npx wrangler d1 migrations apply acg-db --remote   # 本地开发用 --local
 ```
 会依次建表：`0001` 基础（settings/sources/pushed/runs + 默认数据源）、`0002` 订阅者、`0003` QQ 官方设置、`0004` 凭证。
 
-**连 Git 自动构建时（推荐）：** 在 Workers Builds 的 **Deploy command** 里让每次部署自动同步 schema：
+**连 Git 自动构建时（推荐）：** 在 Workers Builds 的 **Deploy command** 里让每次部署自动建库并同步 schema——**先部署、再迁移**（库是部署时才自动开通的，迁移必须排在其后）：
 ```
-npx wrangler d1 migrations apply acg-db --remote && npx wrangler deploy
+npx wrangler deploy && npx wrangler d1 migrations apply acg-db --remote
 ```
 这样任何缺失的表都会在部署时自动补齐，新增迁移也会自动跟上。
 
@@ -65,9 +87,9 @@ npx wrangler secret put ADMIN_TOKEN
 npm run deploy
 ```
 
-**方式二 · 连 Git 自动构建（本项目当前采用，推荐）：** Cloudflare 面板 → Workers & Pages → Create → Workers → Connect to Git，选中仓库与 `main` 分支。Deploy command 建议设为（自动迁移 + 部署）：
+**方式二 · 连 Git 自动构建（本项目当前采用，推荐）：** 见开头的「快速部署 · 连 Git」。Deploy command 设为（**先部署再迁移**）：
 ```
-npx wrangler d1 migrations apply acg-db --remote && npx wrangler deploy
+npx wrangler deploy && npx wrangler d1 migrations apply acg-db --remote
 ```
 之后每次 `git push` 到 `main` 自动构建部署。
 
