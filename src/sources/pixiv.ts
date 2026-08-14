@@ -22,7 +22,9 @@ export const pixiv: SourceAdapter = {
       return [];
     }
     const mode = opts.mode || "daily"; // 使用非 _r18 榜单
-    const url = `https://www.pixiv.net/ranking.php?mode=${encodeURIComponent(mode)}&content=illust&format=json&p=1`;
+    // 榜单 API 走反代(PIXIV_API_BASE)以绕开 Pixiv 对 Cloudflare/机房 IP 的 403 封锁；留空则直连。
+    const apiBase = (env.PIXIV_API_BASE || "https://www.pixiv.net").replace(/\/$/, "");
+    const url = `${apiBase}/ranking.php?mode=${encodeURIComponent(mode)}&content=illust&format=json&p=1`;
     const data = await fetchJson<{ contents?: PixivRankItem[] }>(url, {
       headers: { Referer: "https://www.pixiv.net/" },
     });

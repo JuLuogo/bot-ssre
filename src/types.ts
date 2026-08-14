@@ -6,7 +6,8 @@ export interface Env {
   ASSETS: Fetcher;
   ENVIRONMENT: string;
   PIXIV_PROXY_HOST: string;
-  // 以下为 secret（wrangler secret put），本地可用 .dev.vars
+  // 以下为 secret（wrangler secret put）/ 可后台配的凭证，本地可用 .dev.vars
+  PIXIV_API_BASE?: string; // Pixiv 榜单 API 反代 base（绕开 Cloudflare IP 被 Pixiv 封）；留空直连 www.pixiv.net
   TG_BOT_TOKEN?: string;
   NAPCAT_BASE_URL?: string;
   NAPCAT_TOKEN?: string;
