@@ -58,9 +58,9 @@
   <h1>🎨 插画排行推送 · 管理后台</h1>
   <div class="row">
     <span class="muted" id="envTag"></span>
-    <input type="password" id="token" placeholder="ADMIN_TOKEN（写操作需要）" style="width:230px" />
     <button class="ghost btn-sm" id="refreshBtn">刷新</button>
     <button id="runBtn">立即爬取推送</button>
+    <button class="ghost btn-sm" id="logoutBtn">登出</button>
   </div>
 </header>
 <div class="wrap">
@@ -214,9 +214,6 @@
 <div id="toast" class="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const tokenEl = $("token");
-tokenEl.value = localStorage.getItem("adminToken") || "";
-tokenEl.addEventListener("change", () => localStorage.setItem("adminToken", tokenEl.value));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (ms) => (ms ? new Date(ms).toLocaleString("zh-CN") : "-");
 
@@ -230,10 +227,10 @@ function toast(msg, bad) {
 }
 
 async function api(path, method = "GET", body) {
-  const opt = { method, headers: {} };
-  if (tokenEl.value) opt.headers["Authorization"] = "Bearer " + tokenEl.value;
+  const opt = { method, headers: {}, credentials: "same-origin" };
   if (body !== undefined) { opt.headers["Content-Type"] = "application/json"; opt.body = JSON.stringify(body); }
   const r = await fetch(path, opt);
+  if (r.status === 401) { location.reload(); return { ok: false, error: "未授权，请重新登录" }; }
   return await r.json().catch(() => ({ ok: false, error: "响应解析失败" }));
 }
 
@@ -460,6 +457,7 @@ async function refreshAll() {
 }
 $("runBtn").onclick = runNow;
 $("refreshBtn").onclick = async () => { await refreshAll(); toast("已刷新"); };
+$("logoutBtn").onclick = async () => { try { await api("/api/logout", "POST"); } finally { location.reload(); } };
 $("srcSaveBtn").onclick = saveSource;
 $("srcResetBtn").onclick = resetForm;
 $("cfgSaveBtn").onclick = saveConfig;

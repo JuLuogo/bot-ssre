@@ -27,10 +27,11 @@
     }
   ],
   // 网页 demo 静态资源
+  // 网页 demo 静态资源。run_worker_first: true —— 所有请求先经 Worker（做登录门禁），鉴权后再交给 ASSETS。
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/tg/*", "/qq/*", "/onebot/*", "/__scheduled"]
+    "run_worker_first": true
   },
   // 非敏感变量。敏感项（TG_BOT_TOKEN / NAPCAT_* / ADMIN_TOKEN）用 `wrangler secret put` 设置。
   "vars": {

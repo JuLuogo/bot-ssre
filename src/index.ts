@@ -7,6 +7,7 @@ import { handleQQBotWebhook } from "./qqbot_webhook";
 import { handleOneBotWebhook } from "./onebot_webhook";
 import { alreadyExecuted } from "./store";
 import { resolveEnv } from "./creds";
+import { isAuthed, loginResponse } from "./auth";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -23,6 +24,8 @@ export default {
       return handleOneBotWebhook(request, env);
     }
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
+    // 后台页面门禁：未登录一律显示登录页，鉴权后才下发管理 SPA
+    if (!(await isAuthed(request, env))) return loginResponse();
     return env.ASSETS.fetch(request);
   },
 

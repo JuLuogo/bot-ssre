@@ -14,21 +14,13 @@ import {
 } from "./db";
 import { listCredentialStatus, setCredential, deleteCredential, resolveEnv } from "./creds";
 import { getAccessToken } from "./channels/qqbot";
+import { isAuthed, checkPassword, buildSessionCookie, buildClearCookie } from "./auth";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
-
-/** 写操作鉴权：设置了 ADMIN_TOKEN 则校验；未设置时仅非生产环境放行。 */
-function authorized(request: Request, env: Env): boolean {
-  if (!env.ADMIN_TOKEN) return env.ENVIRONMENT !== "production";
-  const h = request.headers.get("Authorization") || "";
-  const bearer = h.startsWith("Bearer ") ? h.slice(7) : "";
-  const token = bearer || new URL(request.url).searchParams.get("token") || "";
-  return token === env.ADMIN_TOKEN;
-}
 
 interface TestResult {
   ok: boolean;
@@ -84,6 +76,34 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
   const { pathname } = url;
   const method = request.method;
 
+  // 登录 / 登出：本身不需要已鉴权
+  if (pathname === "/api/login" && method === "POST") {
+    if (!env.ADMIN_TOKEN) return json({ ok: false, error: "后台未配置 ADMIN_TOKEN，请先设置该密钥" }, 503);
+    const b = (await request.json().catch(() => null)) as { password?: string } | null;
+    if (!b?.password || !checkPassword(env, b.password)) return json({ ok: false, error: "口令错误" }, 401);
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Set-Cookie": await buildSessionCookie(request, env),
+      },
+    });
+  }
+  if (pathname === "/api/logout" && method === "POST") {
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Set-Cookie": buildClearCookie(request),
+      },
+    });
+  }
+
+  // 其余所有 /api/*（读与写）一律需要鉴权
+  if (!(await isAuthed(request, env))) return json({ ok: false, error: "unauthorized" }, 401);
+
   if (pathname === "/api/status" && method === "GET") {
     const renv = await resolveEnv(env);
     const [cfg, last] = await Promise.all([getConfig(env), latestRun(env)]);
@@ -111,13 +131,11 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
   }
 
   if (pathname === "/api/run" && method === "POST") {
-    if (!authorized(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
     return json({ ok: true, summary: await runOnce(await resolveEnv(env)) });
   }
 
   // 连通性自检
   if (pathname === "/api/test" && method === "POST") {
-    if (!authorized(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
     const renv = await resolveEnv(env);
     const target = url.searchParams.get("target") || "";
     if (target === "telegram") {
@@ -132,7 +150,6 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
   // 凭证：只回掩码与来源，永不返回原文
   if (pathname === "/api/credentials") {
     if (method === "GET") return json({ ok: true, items: await listCredentialStatus(env) });
-    if (!authorized(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
     if (method === "POST") {
       const b = (await request.json().catch(() => null)) as { name?: string; value?: string } | null;
       if (!b?.name || typeof b.value !== "string") return json({ ok: false, error: "需 name 与 value" }, 400);
@@ -150,7 +167,6 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
 
   if (pathname === "/api/sources") {
     if (method === "GET") return json({ ok: true, items: await listSources(env) });
-    if (!authorized(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
     if (method === "POST") {
       const b = (await request.json().catch(() => null)) as Partial<SourceConfig> | null;
       if (!b || !b.adapter || !b.label) return json({ ok: false, error: "invalid source（需 adapter 和 label）" }, 400);
@@ -179,7 +195,6 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
   if (pathname === "/api/config") {
     if (method === "GET") return json({ ok: true, config: await getConfig(env) });
     if (method === "POST") {
-      if (!authorized(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
       const b = (await request.json().catch(() => null)) as Partial<AppConfig> | null;
       if (!b || !b.telegram || !b.napcat) return json({ ok: false, error: "invalid config body" }, 400);
       await saveConfig(env, {
@@ -199,7 +214,6 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
       const p = url.searchParams.get("platform");
       return json({ ok: true, items: await listSubscribers(env, p && p !== "all" ? p : null, false) });
     }
-    if (!authorized(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
     if (method === "DELETE") {
       const id = Number(url.searchParams.get("id"));
       if (!id) return json({ ok: false, error: "missing id" }, 400);
