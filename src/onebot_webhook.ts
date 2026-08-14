@@ -3,7 +3,7 @@
 // 只有命中触发词才验签、读配置、抓图、回复。
 import type { Env } from "./types";
 import { resolveEnv } from "./creds";
-import { getOnDemandConfig, fetchOneIllust } from "./ondemand";
+import { getOnDemandConfig, fetchRandomIllusts, matchTrigger } from "./ondemand";
 import { sendGroupImage, sendPrivateImage, sendGroupText, sendPrivateText } from "./channels/napcat";
 
 const okJson = (): Response => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
@@ -53,18 +53,7 @@ function parseMessage(ev: OneBotEvent): { text: string; atSelf: boolean } {
   return { text: text.trim(), atSelf };
 }
 
-/** 命中触发词时返回其后的关键词作为 tag（要求触发词后是空格或结束，避免"涩图集"误触）。 */
-function matchTrigger(text: string, triggers: string[]): { hit: boolean; tags: string } {
-  for (const trig of triggers) {
-    if (text === trig) return { hit: true, tags: "" };
-    if (text.startsWith(trig)) {
-      const after = text.slice(trig.length);
-      if (/^\s/.test(after)) return { hit: true, tags: after.trim() };
-    }
-  }
-  return { hit: false, tags: "" };
-}
-
+/** 命中触发词时返回其后的关键词作为 tag（逻辑见 ondemand.matchTrigger）。 */
 async function verifySignature(secret: string, sigHeader: string, raw: string): Promise<boolean> {
   const expected = sigHeader.replace(/^sha1=/i, "").toLowerCase();
   if (!expected) return false;
@@ -112,15 +101,17 @@ export async function handleOneBotWebhook(request: Request, env: Env): Promise<R
   const groupId = String(ev.group_id ?? "");
   const userId = String(ev.user_id ?? "");
   try {
-    const illust = await fetchOneIllust(renv, tags);
-    if (!illust) {
+    const illusts = await fetchRandomIllusts(renv, tags, od.count);
+    if (illusts.length === 0) {
       const tip = tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试";
       if (isGroup) await sendGroupText(renv, groupId, tip);
       else await sendPrivateText(renv, userId, tip);
       return okJson();
     }
-    if (isGroup) await sendGroupImage(renv, groupId, illust);
-    else await sendPrivateImage(renv, userId, illust);
+    for (const illust of illusts) {
+      if (isGroup) await sendGroupImage(renv, groupId, illust);
+      else await sendPrivateImage(renv, userId, illust);
+    }
   } catch (e) {
     // 出错也回 200，避免 NapCat 触发重试风暴
     console.log("[onebot] error:", e instanceof Error ? e.message : String(e));

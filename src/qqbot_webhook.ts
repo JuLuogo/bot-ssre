@@ -1,9 +1,10 @@
 // QQ 官方机器人 webhook：op=13 回调地址验证、事件验签、订阅命令处理。
 import type { Env } from "./types";
 import { subscribe, unsubscribe } from "./db";
-import { sendText } from "./channels/qqbot";
+import { sendText, sendImage } from "./channels/qqbot";
 import { signQQValidation, verifyQQSignature } from "./qqsign";
 import { resolveEnv } from "./creds";
+import { getOnDemandConfig, fetchRandomIllusts, matchTrigger } from "./ondemand";
 
 interface QQPayload {
   op?: number;
@@ -67,6 +68,32 @@ export async function handleQQBotWebhook(request: Request, env: Env): Promise<Re
   if (t === "C2C_MESSAGE_CREATE" || t === "GROUP_AT_MESSAGE_CREATE" || t === "GROUP_MESSAGE_CREATE") {
     const content = String(d.content ?? "").trim();
     const msgId = typeof d.id === "string" ? d.id : undefined;
+
+    // 提示词触发返图（与其他平台共用 ondemand 配置）；群 @ 事件本身即已 @机器人
+    const od = await getOnDemandConfig(renv);
+    if (od.enabled) {
+      const { hit, tags } = matchTrigger(content, od.triggers);
+      if (hit) {
+        try {
+          const illusts = await fetchRandomIllusts(renv, tags, od.count);
+          if (illusts.length === 0) {
+            await sendText(renv, target, tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试", msgId);
+          } else {
+            for (const il of illusts) {
+              try {
+                await sendImage(renv, target, il, msgId);
+              } catch (e) {
+                console.warn("[qqbot] 发图失败:", e instanceof Error ? e.message : String(e));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[qqbot] 按需返图异常:", e instanceof Error ? e.message : String(e));
+        }
+        return json({});
+      }
+    }
+
     const first = content.split(/\s+/).filter(Boolean)[0]?.toLowerCase() ?? "";
 
     if (first === "/start" || first === "/subscribe" || content === "订阅") {

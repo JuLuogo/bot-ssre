@@ -8,29 +8,57 @@ import { isAllAges } from "./filter";
 export interface OnDemandConfig {
   enabled: boolean; // 是否响应命令
   triggers: string[]; // 触发词（后跟空格 + 关键词作为 tag）
+  count: number; // 每次触发推送张数
   requireAtInGroup: boolean; // 群聊是否必须 @机器人
   allowPrivate: boolean; // 是否响应私聊
-  fetchLimit: number; // 每次从数据源拉取多少条再随机取一张
 }
 
 const DEFAULT_ONDEMAND: OnDemandConfig = {
   enabled: true,
   triggers: ["涩图", "/setu"],
+  count: 1,
   requireAtInGroup: true,
   allowPrivate: true,
-  fetchLimit: 40,
 };
+
+const ONDEMAND_KEY = "ondemand";
 
 export async function getOnDemandConfig(env: Env): Promise<OnDemandConfig> {
   try {
     const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?")
-      .bind("napcat_command")
+      .bind(ONDEMAND_KEY)
       .first<{ value: string }>();
-    if (row?.value) return { ...DEFAULT_ONDEMAND, ...(JSON.parse(row.value) as Partial<OnDemandConfig>) };
+    if (row?.value) {
+      const c = { ...DEFAULT_ONDEMAND, ...(JSON.parse(row.value) as Partial<OnDemandConfig>) };
+      c.count = Math.max(1, Math.min(20, Number(c.count) || 1));
+      if (!Array.isArray(c.triggers) || c.triggers.length === 0) c.triggers = DEFAULT_ONDEMAND.triggers;
+      return c;
+    }
   } catch {
     // 表未迁移/无记录：用默认
   }
   return DEFAULT_ONDEMAND;
+}
+
+export async function setOnDemandConfig(env: Env, cfg: OnDemandConfig): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+  )
+    .bind(ONDEMAND_KEY, JSON.stringify(cfg))
+    .run();
+}
+
+/** 命中触发词时返回其后的关键词作为 tag（要求触发词后是空格或结束，避免"涩图集"误触）。 */
+export function matchTrigger(text: string, triggers: string[]): { hit: boolean; tags: string } {
+  for (const trig of triggers) {
+    if (!trig) continue;
+    if (text === trig) return { hit: true, tags: "" };
+    if (text.startsWith(trig)) {
+      const after = text.slice(trig.length);
+      if (/^\s/.test(after)) return { hit: true, tags: after.trim() };
+    }
+  }
+  return { hit: false, tags: "" };
 }
 
 type Booru = { adapter: "gelbooru" | "moebooru"; site?: string; label?: string };

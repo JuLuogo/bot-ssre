@@ -97,26 +97,32 @@ function caption(i: Illust): string {
 export const qqbot: ChannelAdapter = {
   name: "qqbot",
   async push(env: Env, illust: Illust, target: string): Promise<void> {
-    if (!illust.imageUrl) throw new Error("imageUrl 为空");
-    const token = await getAccessToken(env);
-    const { scope, openid } = parseTarget(target);
-    const fileInfo = await uploadMedia(token, scope, openid, illust.imageUrl);
-
-    const send = async (withContent: boolean): Promise<{ ok: boolean; txt: string }> => {
-      const body: Record<string, unknown> = { msg_type: 7, media: { file_info: fileInfo } };
-      if (withContent) body.content = caption(illust);
-      const res = await fetch(`${API}/v2/${scope}/${openid}/messages`, {
-        method: "POST",
-        headers: authHeaders(token),
-        body: JSON.stringify(body),
-      });
-      return { ok: res.ok, txt: await res.text() };
-    };
-
-    // 优先图 + 文案；若接口不接受 content 则回退为仅图片
-    const first = await send(true);
-    if (first.ok) return;
-    const retry = await send(false);
-    if (!retry.ok) throw new Error(`QQ 官方发送失败: ${first.txt} ｜ 仅图片重试: ${retry.txt}`);
+    await sendImage(env, target, illust);
   },
 };
+
+/** 发图；带 msgId 为被动回复（不占主动消息频次），用于提示词触发返图。 */
+export async function sendImage(env: Env, target: string, illust: Illust, msgId?: string): Promise<void> {
+  if (!illust.imageUrl) throw new Error("imageUrl 为空");
+  const token = await getAccessToken(env);
+  const { scope, openid } = parseTarget(target);
+  const fileInfo = await uploadMedia(token, scope, openid, illust.imageUrl);
+
+  const send = async (withContent: boolean): Promise<{ ok: boolean; txt: string }> => {
+    const body: Record<string, unknown> = { msg_type: 7, media: { file_info: fileInfo } };
+    if (withContent) body.content = caption(illust);
+    if (msgId) body.msg_id = msgId;
+    const res = await fetch(`${API}/v2/${scope}/${openid}/messages`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(body),
+    });
+    return { ok: res.ok, txt: await res.text() };
+  };
+
+  // 优先图 + 文案；若接口不接受 content 则回退为仅图片
+  const first = await send(true);
+  if (first.ok) return;
+  const retry = await send(false);
+  if (!retry.ok) throw new Error(`QQ 官方发送失败: ${first.txt} ｜ 仅图片重试: ${retry.txt}`);
+}

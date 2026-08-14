@@ -111,6 +111,23 @@
   </div>
 
   <div class="card">
+    <h2 class="section-title">🖼 提示词触发返图（所有平台）</h2>
+    <p class="section-desc">
+      在 Telegram / QQ官方 / 个人QQ(NapCat) 里发送触发词即返图（返回全年龄安全向）。群里需 @机器人（QQ/NapCat），私聊直接触发。
+      触发词后跟空格 + 关键词可作为 booru tag，例：<code>涩图 原神</code>。
+    </p>
+    <div class="form-grid">
+      <label class="chk"><input type="checkbox" id="od_enabled" /> 启用</label>
+      <label class="f">触发词（逗号分隔）<input type="text" id="od_triggers" placeholder="涩图, /setu" /></label>
+      <label class="f">每次张数<input type="number" id="od_count" value="1" min="1" max="20" /></label>
+      <label class="chk"><input type="checkbox" id="od_at" /> 群聊需 @机器人</label>
+      <label class="chk"><input type="checkbox" id="od_private" /> 响应私聊</label>
+      <div class="row"><button class="btn-sm" id="odSaveBtn">保存触发设置</button></div>
+    </div>
+    <div id="odMsg" class="kv" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
     <h2 class="section-title">📚 数据源 / 订阅</h2>
     <p class="section-desc">booru / Pixiv 排行榜按分级过滤后推送；RSS(RSSHub) 视为可信来源，默认跳过全年龄过滤。</p>
     <table>
@@ -453,9 +470,30 @@ async function runNow() {
     await loadStatus(); await loadRuns(); await loadGallery();
   }
 }
+async function loadOndemand() {
+  const d = await api("/api/ondemand");
+  const c = d.config || {};
+  $("od_enabled").checked = !!c.enabled;
+  $("od_triggers").value = (c.triggers || []).join(", ");
+  $("od_count").value = c.count ?? 1;
+  $("od_at").checked = c.requireAtInGroup !== false;
+  $("od_private").checked = c.allowPrivate !== false;
+}
+async function saveOndemand() {
+  const triggers = $("od_triggers").value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  const d = await api("/api/ondemand", "POST", {
+    enabled: $("od_enabled").checked,
+    triggers,
+    count: Number($("od_count").value) || 1,
+    requireAtInGroup: $("od_at").checked,
+    allowPrivate: $("od_private").checked,
+  });
+  $("odMsg").innerHTML = d.ok ? '<span class="okc">已保存。</span>' : `<span class="err">${esc(d.error)}</span>`;
+  if (d.ok) toast("触发设置已保存");
+}
 async function refreshAll() {
   await loadStatus(); await loadCreds(); await loadSources();
-  await loadSubscribers(); await loadRuns(); await loadGallery();
+  await loadSubscribers(); await loadRuns(); await loadGallery(); await loadOndemand();
 }
 async function runRandom() {
   const n = Math.max(1, Math.min(20, Number($("randCount").value) || 5));
@@ -476,6 +514,7 @@ $("logoutBtn").onclick = async () => { try { await api("/api/logout", "POST"); }
 $("srcSaveBtn").onclick = saveSource;
 $("srcResetBtn").onclick = resetForm;
 $("cfgSaveBtn").onclick = saveConfig;
+$("odSaveBtn").onclick = saveOndemand;
 $("f_adapter").onchange = updateSrcHint;
 updateSrcHint();
 refreshAll();

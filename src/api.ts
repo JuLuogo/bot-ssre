@@ -15,6 +15,7 @@ import {
 import { listCredentialStatus, setCredential, deleteCredential, resolveEnv } from "./creds";
 import { getAccessToken } from "./channels/qqbot";
 import { isAuthed, checkPassword, buildSessionCookie, buildClearCookie } from "./auth";
+import { getOnDemandConfig, setOnDemandConfig, type OnDemandConfig } from "./ondemand";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -138,6 +139,25 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
   if (pathname === "/api/push-random" && method === "POST") {
     const n = Math.max(1, Math.min(20, Number(url.searchParams.get("count")) || 5));
     return json({ ok: true, summary: await pushRandomBatch(await resolveEnv(env), n) });
+  }
+
+  // 提示词触发返图配置（所有平台共用）
+  if (pathname === "/api/ondemand") {
+    if (method === "GET") return json({ ok: true, config: await getOnDemandConfig(env) });
+    if (method === "POST") {
+      const b = (await request.json().catch(() => null)) as Partial<OnDemandConfig> | null;
+      if (!b) return json({ ok: false, error: "invalid body" }, 400);
+      const triggers = Array.isArray(b.triggers) ? b.triggers.map((s) => String(s).trim()).filter(Boolean) : [];
+      const cfg: OnDemandConfig = {
+        enabled: !!b.enabled,
+        triggers: triggers.length ? triggers : ["涩图", "/setu"],
+        count: Math.max(1, Math.min(20, Number(b.count) || 1)),
+        requireAtInGroup: b.requireAtInGroup !== false,
+        allowPrivate: b.allowPrivate !== false,
+      };
+      await setOnDemandConfig(env, cfg);
+      return json({ ok: true, config: cfg });
+    }
   }
 
   // 连通性自检
