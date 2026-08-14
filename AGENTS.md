@@ -41,3 +41,54 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 - 后端改动跑 `npx tsc --noEmit`。
 - 需要本地跑时用 `npx wrangler dev --local`；测登录要注入密钥（`--var ADMIN_TOKEN:<值>` 或写 `.dev.vars`），本地 D1 先 `npx wrangler d1 migrations apply acg-db --local` 建表。
 - 收尾清理临时文件、还原 `.dev.vars` 等本地改动。
+
+---
+
+# 当前工作进度（截至 2026-08-14）
+
+> 本节记录进行中的工作终止点，供下一次开工接续。**更新本文件时请顺带刷新本节。**
+
+## 已完成并已推送（线上生效）
+- 后台全量登录门禁（`src/auth.ts`，ADMIN_TOKEN 口令，fail-closed）✅ 已部署
+- QQ 官方回调 op=13 走快路径（Worker Secret 优先，2ms）→ **回调验证已通过** ✅
+- Pixiv 榜单 API 反代 `PIXIV_API_BASE`（绕开 Cloudflare IP 被 Pixiv 封 403）✅ 已部署
+- 手动「推送随机新图」按钮（可填张数、不去重、随机 booru）✅ 已部署
+- 提示词触发返图扩展到全平台（TG / QQ官方 / NapCat）+ 触发词/张数后台可配 ✅ 已部署
+
+## 进行中：接入自有静态随机图库（randompic）
+
+**代码已就绪、已通过本地验证，但尚未 commit/push/部署：**
+
+| 状态 | 文件 | 说明 |
+|---|---|---|
+| 新增 ✅ | `src/sources/randompic.ts` | 读 `random.js` counts → 服务端随机编号 → 拼 `{site}/ri/{type}/{num}.webp`；每类 HEAD 健康检查；manifest 缓存 KV 15min；单批 Set 去重 |
+| 新增 ✅ | `migrations/0005_randompic.sql` | 默认插入自有图库数据源（幂等，已本地验证重复执行只 1 条） |
+| 修改 ✅ | `src/types.ts` | `SourceConfig.adapter` 加 `randompic` |
+| 修改 ✅ | `src/sources/index.ts` | 注册 randompic 适配器 |
+| 修改 ✅ | `src/ondemand.ts` | `fetchRandomIllusts` 无关键词时优先 randompic，带关键词回退 booru |
+| 修改 ✅ | `public/index.html` | 下拉加 randompic 选项 + hint |
+| 修改 ✅ | `docs/DEPLOYMENT.md` / `.gitignore` | 文档与忽略 `.serena/` |
+| 新增 ⚠️ | `docs/RANDOM_IMAGE_APIS.md` | **只完成 1~2 节（推荐池 14 项 + 自有图库），43 行处留有 `<!-- MORE -->`，第 3/4/5 节（中文圈待审/国际候选/失效清单）未写** |
+
+**本地验证结果（可信）：**
+- `npx tsc --noEmit` ✅ EXIT:0
+- 迁移幂等：独立本地 D1 连续 apply 两次，randompic 数据源仅 1 条 ✅
+- 适配器执行测试：取 10 张 → 10 张去重、全部 `pic.060730.xyz`、自动跳过当前 404 的 `j` 类、第二次调用命中 KV 缓存（0 次外部请求）✅
+
+**关键事实（勿再踩坑）：**
+- 图片域名**只用 `https://pic.060730.xyz`**；`pic.0721030.xyz` 不可用（523），**忽略不探测**。
+- 图库当前 `h=979, v=3596, j=1793`，`j` 路径当前 404 → 适配器自动跳过。
+- 自有图库已确认 **100% 全年龄**，适配器标 `rating: "safe"`，无需再过滤。
+
+## 待办（下次开工按序执行）
+1. 补完 `docs/RANDOM_IMAGE_APIS.md` 第 3~5 节（中文圈待审、国际候选、失效清单）。
+2. `git add` 全部改动 → commit（feat(randompic)）→ `git push origin main`。
+3. 等 Workers Builds 构建，用 `cloudflare-builds` MCP 确认 success。
+4. 远程 D1 迁移：因 Deploy command 是「先部署再迁移」，`0005` 会自动应用（幂等，安全）。
+5. 部署后线上验证：后台 → 数据源出现「自有随机图库」；点「推送随机新图」/ 私聊发触发词 → 应收到 `pic.060730.xyz` 的图。
+6. 可选：把 randompic 也加入「立即爬取推送」的默认运行（当前默认只走排行榜 booru 源，随机图源只在无关键词提示词/随机推送时被优先使用）。
+
+## 环境/账号备注（2026-08-14）
+- Worker：`bot-ssre`；后台 `https://bot-ssre.juluogogo.workers.dev`（或 `https://bot-ces.060730.xyz`）。
+- Cloudflare MCP 本会话可用（bindings/builds/observability）。
+- 队列里的 3 个任务 #25/#26/#27 均 in_progress，对应本节的 randompic 接入、API 审核清单、验证部署。
