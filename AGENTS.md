@@ -101,7 +101,10 @@ QQ 国内服务器拉不动慢反代（pixiv 回源冷启动 10s+ → `40093007 
 所以**后台画廊直接用原反代地址预览**，中转图不必保留——因此推送记录里存的是原图地址，不是 `/img/<key>`。
 
 - 新增 R2 桶 `bot-ssre-relay`（`wrangler.jsonc` 靠自动开通；换账号首次若没自动建，
-  用 `npx wrangler r2 bucket create bot-ssre-relay`）。
+  用 `npx wrangler r2 bucket create bot-ssre-relay --location apac`）。
+  **地区只能在创建时定、且不可改**：配置文件里 `r2_buckets` 只有 `jurisdiction`、没有 location 字段，
+  自动开通会默认建到美西(WNAM)。桶在美西会让 Worker 读 R2 跨太平洋、拖慢 QQ 那次拉取，
+  所以应删掉重建为 **APAC**（控制台选 Asia-Pacific，或 CLI 加 `--location apac`）。桶是空的(发完即删)，删了无损。
 - `src/relay.ts`：`stageImage` 下载存 R2 → **公开路由 `GET /img/<key>`**（`serveImage`）秒回 →
   `dropImage` 发送后立即删。`pruneOrphans` 每日 cron 只兜底清 6 小时以上的崩溃孤儿。key 128bit 随机不可枚举。
 - 中转逻辑在**渠道层**（`channels/qqbot.ts` 的 `sendImage`→`maybeStageForQQ`）：仅当图片 host ==
