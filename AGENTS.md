@@ -92,29 +92,25 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
    多次触发返图后在「🩺 触发诊断」里看 `来源=` 是否在不同源之间轮换，以确认多源随机 + 故障切换生效。
 3. 可选：若希望每日定时推送也混入随机图，需要新增开关（当前按第 8 条约定刻意排除）。
 
-## 已完成：pixiv 图经 R2 中转发 QQ（2026-08-15）
+## 已完成：pixiv 图发 QQ —— 靠「图片地址整体改用自有反代」，最终不走中转（2026-08-15）
 
-QQ 国内服务器拉不动慢反代（pixiv 回源冷启动 10s+ → `40093007 富媒体文件下载失败`），而随机图（含
-自有 `pic.060730.xyz` 静态图）秒回、QQ 能拉到。QQ 接口只收 URL、不收字节（已查官方 botpy SDK 证实）。
+问题演进与最终结论（线上实测确认）：
+- QQ 国内服务器拉不动慢/不可达的图 → `40093007 富媒体文件下载失败`；QQ 接口只收 URL、不收字节（查官方 botpy SDK 证实）。
+- **根因**：`PIXIV_API_BASE` 用的是 PixivNow 类实例（`…app/`），它返回的图片域名是它自家代理（并非 `i.pximg.net`），
+  QQ 拉不动那个域名。**只 `replace("i.pximg.net")` 不生效**。
+- **修法（`pixiv.ts` toProxyUrl）**：把榜单图 URL 的 **origin 整体换成 `PIXIV_PROXY_HOST`**（保留路径），
+  不管 API 返回什么域名，图片一律走用户自有反代。用户实测：换到自有反代 `i.1.***.xyz` 后 **QQ 直接能拉到，无需中转**。
+- 因此：**PIXIV_API_BASE 可用公共 PixivNow 也可自建，PIXIV_PROXY_HOST 指向一个 QQ 可达的 pximg 反代即可，二者解耦、兼容。**
 
-**中转只为喂 QQ，发完即删、不存图**。关键取舍：管理员浏览器能直接访问反代（`i.060730.xyz`），
-所以**后台画廊直接用原反代地址预览**，中转图不必保留——因此推送记录里存的是原图地址，不是 `/img/<key>`。
+**当前形态：不走中转。** R2 中转是备用方案，代码保留但默认关闭（凭证 `PIXIV_QQ_RELAY=off`）：
+- `src/relay.ts` + 公开路由 `GET /img/<key>` + `channels/qqbot.ts` 的 `resolveQQUrl` 仍在，但 `PIXIV_QQ_RELAY=off` 时完全不触发。
+- **已按用户要求从 `wrangler.jsonc` 删除 `r2_buckets` 绑定**（`env.R2` 运行时为 undefined；relay 关闭时不会被访问，
+  `pruneOrphans` 有 try/catch 兜底，安全）。控制台里那个空的 `bot-ssre-relay` 桶可手动删。
+- 若将来某个源 QQ 又拉不动、需要重开中转：把 `r2_buckets` 绑定加回（`--location apac` 建桶）、
+  配 `PUBLIC_BASE_URL`、并把 `PIXIV_QQ_RELAY` 设为非 off 即可。
 
-- 新增 R2 桶 `bot-ssre-relay`（`wrangler.jsonc` 靠自动开通；换账号首次若没自动建，
-  用 `npx wrangler r2 bucket create bot-ssre-relay --location apac`）。
-  **地区只能在创建时定、且不可改**：配置文件里 `r2_buckets` 只有 `jurisdiction`、没有 location 字段，
-  自动开通会默认建到美西(WNAM)。桶在美西会让 Worker 读 R2 跨太平洋、拖慢 QQ 那次拉取，
-  所以应删掉重建为 **APAC**（控制台选 Asia-Pacific，或 CLI 加 `--location apac`）。桶是空的(发完即删)，删了无损。
-- `src/relay.ts`：`stageImage` 下载存 R2 → **公开路由 `GET /img/<key>`**（`serveImage`）秒回 →
-  `dropImage` 发送后立即删。`pruneOrphans` 每日 cron 只兜底清 6 小时以上的崩溃孤儿。key 128bit 随机不可枚举。
-- 中转逻辑在**渠道层**（`channels/qqbot.ts` 的 `sendImage`→`maybeStageForQQ`）：仅当图片 host ==
-  `PIXIV_PROXY_HOST` 且配了 `PUBLIC_BASE_URL` 时中转，QQ 发 `{PUBLIC_BASE_URL}/img/<key>`，`finally` 里删。
-  其它渠道（TG 全球可达）和画廊记录都用原图地址，pipeline 不参与中转。
-- 新增可后台配的凭证 `PUBLIC_BASE_URL`（如 `https://bot-ces.060730.xyz`，须是 QQ 能访问到的域名）。
-- **为什么不用第三方免费图床 / 为什么不存图**：QQ 拉图要「国内可达 + 快」，境外免费床国内不稳且有存活/条款风险；
-  而中转的唯一目的就是喂 QQ 那一下，喂完 QQ 已存到自己服务器（`/files` 阶段取走），R2 副本即可丢，常驻≈0。
-
-**待线上验证**：设 `PUBLIC_BASE_URL` 后触发/推送 pixiv 图，QQ 应能收到；画廊用原反代地址预览正常。
+相关凭证：`PIXIV_API_BASE`(榜单 API 反代)、`PIXIV_PROXY_HOST`(纯域名，图片反代)、`PIXIV_QQ_RELAY`(off=不中转)、
+`PUBLIC_BASE_URL`(中转出口，仅中转时用)。
 
 
 ## 关键事实（勿再踩坑 / 勿再猜）
