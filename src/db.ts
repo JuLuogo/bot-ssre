@@ -25,6 +25,7 @@ interface SourceRow {
   id: number; adapter: string; enabled: number; label: string;
   site: string | null; tags: string | null; mode: string | null;
   limit_n: number; trusted: number; sort_order: number;
+  trigger: string | null; push_all: number | null;
 }
 
 function rowToSource(r: SourceRow): SourceConfig {
@@ -39,6 +40,8 @@ function rowToSource(r: SourceRow): SourceConfig {
     limit: r.limit_n,
     trusted: !!r.trusted,
     sortOrder: r.sort_order,
+    trigger: r.trigger ?? undefined,
+    pushAll: !!r.push_all,
   };
 }
 
@@ -50,16 +53,16 @@ export async function listSources(env: Env): Promise<SourceConfig[]> {
 export async function upsertSource(env: Env, s: SourceConfig): Promise<SourceConfig> {
   if (s.id) {
     await env.DB.prepare(
-      "UPDATE sources SET adapter=?, enabled=?, label=?, site=?, tags=?, mode=?, limit_n=?, trusted=?, sort_order=? WHERE id=?",
+      "UPDATE sources SET adapter=?, enabled=?, label=?, site=?, tags=?, mode=?, limit_n=?, trusted=?, sort_order=?, trigger=?, push_all=? WHERE id=?",
     )
-      .bind(s.adapter, s.enabled ? 1 : 0, s.label, s.site ?? null, s.tags ?? null, s.mode ?? null, s.limit, s.trusted ? 1 : 0, s.sortOrder ?? 0, s.id)
+      .bind(s.adapter, s.enabled ? 1 : 0, s.label, s.site ?? null, s.tags ?? null, s.mode ?? null, s.limit, s.trusted ? 1 : 0, s.sortOrder ?? 0, s.trigger ?? null, s.pushAll ? 1 : 0, s.id)
       .run();
     return s;
   }
   const res = await env.DB.prepare(
-    "INSERT INTO sources(adapter, enabled, label, site, tags, mode, limit_n, trusted, sort_order) VALUES(?,?,?,?,?,?,?,?,?)",
+    "INSERT INTO sources(adapter, enabled, label, site, tags, mode, limit_n, trusted, sort_order, trigger, push_all) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
   )
-    .bind(s.adapter, s.enabled ? 1 : 0, s.label, s.site ?? null, s.tags ?? null, s.mode ?? null, s.limit, s.trusted ? 1 : 0, s.sortOrder ?? 0)
+    .bind(s.adapter, s.enabled ? 1 : 0, s.label, s.site ?? null, s.tags ?? null, s.mode ?? null, s.limit, s.trusted ? 1 : 0, s.sortOrder ?? 0, s.trigger ?? null, s.pushAll ? 1 : 0)
     .run();
   return { ...s, id: Number(res.meta.last_row_id) };
 }

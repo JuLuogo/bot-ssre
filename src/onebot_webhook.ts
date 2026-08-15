@@ -1,9 +1,7 @@
-// OneBot（NapCat）HTTP 上报入口：实现"发命令→实时返图"。
-// 处理顺序按成本从低到高排布：非消息事件 / 非命令消息在最便宜处直接返回，
-// 只有命中触发词才验签、读配置、抓图、回复。
+// OneBot（NapCat）HTTP 上报入口：实现"发命令/关键词→实时返图"，非命中给菜单。
 import type { Env } from "./types";
 import { resolveEnv } from "./creds";
-import { getOnDemandConfig, fetchRandomIllusts, matchTrigger } from "./ondemand";
+import { getOnDemandConfig, resolveAction, fetchForAction, buildMenu, type Action } from "./ondemand";
 import { sendGroupImage, sendPrivateImage, sendGroupText, sendPrivateText } from "./channels/napcat";
 
 const okJson = (): Response => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
@@ -84,13 +82,11 @@ export async function handleOneBotWebhook(request: Request, env: Env, ctx: Execu
   if (!isGroup && !isPrivate) return okJson();
   if (isPrivate && !od.allowPrivate) return okJson();
 
-  // 2) 触发判定：群聊需 @机器人；命中触发词才继续
+  // 2) 群聊需 @机器人；未 @ 的群消息忽略（隐私）。私聊/群@ 都会继续（命中触发→发图，否则发菜单）
   const { text, atSelf } = parseMessage(ev);
   if (isGroup && od.requireAtInGroup && !atSelf) return okJson();
-  const { hit, tags } = matchTrigger(text, od.triggers);
-  if (!hit) return okJson();
 
-  // 3) 命中命令（稀有）：合并 D1 凭证，若配置了 secret 则验签
+  // 3) 合并 D1 凭证，若配置了 secret 则验签
   const renv = await resolveEnv(env);
   const secret = renv.NAPCAT_WEBHOOK_SECRET;
   if (secret) {
@@ -100,31 +96,49 @@ export async function handleOneBotWebhook(request: Request, env: Env, ctx: Execu
 
   const groupId = String(ev.group_id ?? "");
   const userId = String(ev.user_id ?? "");
+  const action = await resolveAction(renv, text);
   // 抓图+发图可能数秒，NapCat 侧超时会重推同一事件；立刻回 200，重活交给 waitUntil。
-  ctx.waitUntil(replyIllusts(renv, isGroup, groupId, userId, tags, od.count));
+  ctx.waitUntil(replyAction(renv, isGroup, groupId, userId, action, od.count));
   return okJson();
 }
 
-/** 后台完成「抓图 → 发图」，异常只记日志（上报已回 200）。 */
-async function replyIllusts(
+/** 后台完成「抓图 → 发图」或「发菜单」，异常只记日志（上报已回 200）。 */
+async function replyAction(
   env: Env,
   isGroup: boolean,
   groupId: string,
   userId: string,
-  tags: string,
+  action: Action,
   count: number,
 ): Promise<void> {
+  const sendText = (t: string) => (isGroup ? sendGroupText(env, groupId, t) : sendPrivateText(env, userId, t));
   try {
-    const illusts = await fetchRandomIllusts(env, tags, count);
+    if (action.kind === "menu") {
+      await sendText(await buildMenu(env));
+      return;
+    }
+    const illusts = await fetchForAction(env, action, count);
     if (illusts.length === 0) {
-      const tip = tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试";
-      if (isGroup) await sendGroupText(env, groupId, tip);
-      else await sendPrivateText(env, userId, tip);
+      const tip =
+        action.kind === "ranking"
+          ? "榜单已推完或暂时取不到，明天再来～"
+          : action.kind === "source"
+            ? `「${action.source.label}」暂时没取到图捏`
+            : action.tags
+              ? `没找到「${action.tags}」相关的图捏`
+              : "没找到图捏，稍后再试";
+      await sendText(tip);
       return;
     }
     for (const illust of illusts) {
-      if (isGroup) await sendGroupImage(env, groupId, illust);
-      else await sendPrivateImage(env, userId, illust);
+      try {
+        if (isGroup) await sendGroupImage(env, groupId, illust);
+        else await sendPrivateImage(env, userId, illust);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        console.log("[onebot] 发图失败:", m);
+        if (/too many subrequests/i.test(m)) break;
+      }
     }
   } catch (e) {
     console.log("[onebot] error:", e instanceof Error ? e.message : String(e));

@@ -150,9 +150,13 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
       const b = (await request.json().catch(() => null)) as Partial<OnDemandConfig> | null;
       if (!b) return json({ ok: false, error: "invalid body" }, 400);
       const triggers = Array.isArray(b.triggers) ? b.triggers.map((s) => String(s).trim()).filter(Boolean) : [];
+      const rankingTriggers = Array.isArray(b.rankingTriggers)
+        ? b.rankingTriggers.map((s) => String(s).trim()).filter(Boolean)
+        : [];
       const cfg: OnDemandConfig = {
         enabled: !!b.enabled,
-        triggers: triggers.length ? triggers : ["涩图", "/setu"],
+        triggers: triggers.length ? triggers : ["涩图", "色图", "来张图", "/setu"],
+        rankingTriggers: rankingTriggers.length ? rankingTriggers : ["排行", "榜单", "pixiv"],
         count: Math.max(1, Math.min(20, Number(b.count) || 1)),
         requireAtInGroup: b.requireAtInGroup !== false,
         allowPrivate: b.allowPrivate !== false,
@@ -234,7 +238,8 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
     return json({ ok: true, added, skipped: metas.length - added, items: await listSources(env) });
   }
 
-  if (pathname === "/api/sources") {    if (method === "GET") return json({ ok: true, items: await listSources(env) });
+  if (pathname === "/api/sources") {
+    if (method === "GET") return json({ ok: true, items: await listSources(env) });
     if (method === "POST") {
       const b = (await request.json().catch(() => null)) as Partial<SourceConfig> | null;
       if (!b || !b.adapter || !b.label) return json({ ok: false, error: "invalid source（需 adapter 和 label）" }, 400);
@@ -255,6 +260,8 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
         limit: b.limit ?? 5,
         trusted: b.trusted ?? b.adapter === "rss",
         sortOrder: b.sortOrder ?? 0,
+        trigger: typeof b.trigger === "string" ? b.trigger.trim() || undefined : undefined,
+        pushAll: !!b.pushAll,
       });
       return json({ ok: true, source: saved });
     }

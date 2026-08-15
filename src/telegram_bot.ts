@@ -2,7 +2,7 @@
 import type { Env } from "./types";
 import { getConfig } from "./config";
 import { subscribe, unsubscribe } from "./db";
-import { getOnDemandConfig, fetchRandomIllusts, matchTrigger } from "./ondemand";
+import { getOnDemandConfig, resolveAction, fetchForAction, buildMenu, type Action } from "./ondemand";
 import { telegram } from "./channels/telegram";
 
 const DEFAULT_API = "https://api.telegram.org";
@@ -22,24 +22,34 @@ async function sendMessage(env: Env, apiBase: string, chatId: string, text: stri
 }
 
 /** 后台完成「抓图 → 发图」，异常只记日志（webhook 已回 ok）。 */
-async function replyIllusts(
+async function replyAction(
   env: Env,
   apiBase: string,
   chatId: string,
-  tags: string,
+  action: Action,
   count: number,
 ): Promise<void> {
   try {
-    const illusts = await fetchRandomIllusts(env, tags, count);
+    const illusts = await fetchForAction(env, action, count);
     if (illusts.length === 0) {
-      await sendMessage(env, apiBase, chatId, tags ? `没找到「${tags}」相关的图` : "没找到图，稍后再试");
+      const tip =
+        action.kind === "ranking"
+          ? "榜单已推完或暂时取不到，明天再来～"
+          : action.kind === "source"
+            ? `「${action.source.label}」暂时没取到图`
+            : action.kind === "random" && action.tags
+              ? `没找到「${action.tags}」相关的图`
+              : "没找到图，稍后再试";
+      await sendMessage(env, apiBase, chatId, tip);
       return;
     }
     for (const il of illusts) {
       try {
         await telegram.push(env, il, chatId, { apiBase });
       } catch (e) {
-        console.warn("[tg] 发图失败:", e instanceof Error ? e.message : String(e));
+        const m = e instanceof Error ? e.message : String(e);
+        console.warn("[tg] 发图失败:", m);
+        if (/too many subrequests/i.test(m)) break;
       }
     }
   } catch (e) {
@@ -69,15 +79,14 @@ export async function handleTelegramWebhook(request: Request, env: Env, ctx: Exe
 
   // 提示词触发返图（与其他平台共用 ondemand 配置）
   const od = await getOnDemandConfig(env);
+  const isGroup = (chat.type || "").includes("group");
   if (od.enabled) {
     const trimmed = (msg.text || "").trim();
-    const { hit, tags } = matchTrigger(trimmed, od.triggers);
-    const isGroup = (chat.type || "").includes("group");
+    const action = await resolveAction(env, trimmed);
     // 群里靠 Telegram 隐私模式过滤（只有 @机器人/命令/回复才会收到）；私聊需 allowPrivate
-    if (hit && (isGroup || od.allowPrivate)) {
-      // 抓图+发图可能数秒；Telegram 超时会重推同一 update 导致重复发图。
-      // 立刻回 ok，重活交给 waitUntil。
-      ctx.waitUntil(replyIllusts(env, apiBase, chatId, tags, od.count));
+    if (action.kind !== "menu" && (isGroup || od.allowPrivate)) {
+      // 抓图+发图可能数秒；Telegram 超时会重推同一 update 导致重复发图。立刻回 ok，重活交给 waitUntil。
+      ctx.waitUntil(replyAction(env, apiBase, chatId, action, od.count));
       return new Response("ok");
     }
   }
@@ -90,8 +99,9 @@ export async function handleTelegramWebhook(request: Request, env: Env, ctx: Exe
     await sendMessage(env, apiBase, chatId, "已退订。发送 /start 可重新订阅。");
   } else if (cmd === "/status") {
     await sendMessage(env, apiBase, chatId, "机器人在线。命令：/start 订阅 · /stop 退订 · /status 状态。");
-  } else {
-    await sendMessage(env, apiBase, chatId, "可用命令：/start 订阅 · /stop 退订 · /status 状态。");
+  } else if (isGroup || od.allowPrivate) {
+    // 私聊非命令非触发 / 群 @ 无命中 → 返回菜单
+    await sendMessage(env, apiBase, chatId, await buildMenu(env));
   }
   return new Response("ok");
 }

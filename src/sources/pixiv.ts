@@ -51,19 +51,31 @@ export const pixiv: SourceAdapter = {
     const mode = opts.mode || "daily"; // 使用非 _r18 榜单
     // 榜单 API 走反代(PIXIV_API_BASE)以绕开 Pixiv 对 Cloudflare/机房 IP 的 403 封锁；留空则直连。
     const apiBase = (env.PIXIV_API_BASE || "https://www.pixiv.net").replace(/\/$/, "");
-    const url = `${apiBase}/ranking.php?mode=${encodeURIComponent(mode)}&content=illust&format=json&p=1`;
-    const data = await fetchJson<{ contents?: PixivRankItem[] }>(url, {
-      headers: PIXIV_BROWSER_HEADERS,
-    });
-    const contents = data.contents ?? [];
-    return contents
+    const want = Math.max(1, opts.limit);
+    // 榜单每页约 50；需要更多就翻页拼够（硬上限 10 页 ≈ 500，防失控）。
+    const maxPages = Math.min(10, Math.ceil(want / 50));
+    const raw: PixivRankItem[] = [];
+    for (let p = 1; p <= maxPages && raw.length < want; p++) {
+      const url = `${apiBase}/ranking.php?mode=${encodeURIComponent(mode)}&content=illust&format=json&p=${p}`;
+      let data: { contents?: PixivRankItem[] };
+      try {
+        data = await fetchJson<{ contents?: PixivRankItem[] }>(url, { headers: PIXIV_BROWSER_HEADERS });
+      } catch (e) {
+        if (p === 1) throw e; // 第一页就失败才算真失败；后续页失败用已拿到的
+        break;
+      }
+      const page = data.contents ?? [];
+      if (page.length === 0) break;
+      raw.push(...page);
+    }
+    return raw
       // 丢弃 pixiv 的"受限/需登录"占位图（url 落在 s.pximg.net/common/.../limit_unviewable*）：
       // 它不是真作品，推过去只是一张灰色占位 PNG。
       .filter((c) => {
         const u = String(c.url || "");
         return u && !u.includes("limit_unviewable") && !u.includes("s.pximg.net/common");
       })
-      .slice(0, opts.limit)
+      .slice(0, want)
       .map((c): Illust => {
         const ct = c.illust_content_type ?? {};
         const safe = (ct.sexual ?? 0) === 0 && !ct.lo && !ct.grotesque;

@@ -4,7 +4,7 @@ import { subscribe, unsubscribe } from "./db";
 import { sendText, sendImage, rememberPassiveMsgId } from "./channels/qqbot";
 import { signQQValidation, verifyQQSignature } from "./qqsign";
 import { resolveEnv } from "./creds";
-import { getOnDemandConfig, fetchRandomIllusts, matchTrigger } from "./ondemand";
+import { getOnDemandConfig, resolveAction, fetchForAction, buildMenu, type Action } from "./ondemand";
 import { diag } from "./diag";
 
 interface QQPayload {
@@ -24,26 +24,33 @@ const err = (e: unknown) => (e instanceof Error ? e.message : String(e));
  * 关键：任何一步失败都要**告诉用户**并写诊断日志——以前失败只 console.warn，
  * 用户侧完全静默，看起来就像"发了触发词没反应"。
  */
-async function replyIllusts(
+async function replyAction(
   env: Env,
   target: string,
-  tags: string,
+  action: Action,
   count: number,
   msgId?: string,
 ): Promise<void> {
   const t0 = Date.now();
   try {
-    const illusts = await fetchRandomIllusts(env, tags, count);
+    const illusts = await fetchForAction(env, action, count);
     if (illusts.length === 0) {
-      await diag(env, "qqbot", `取图 0 张（tags="${tags}"）→ 回文本提示`);
-      await sendText(env, target, tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试", msgId);
+      const tip =
+        action.kind === "ranking"
+          ? "榜单已推完或暂时取不到，明天再来～"
+          : action.kind === "source"
+            ? `「${action.source.label}」暂时没取到图捏`
+            : action.kind === "random" && action.tags
+              ? `没找到「${action.tags}」相关的图捏`
+              : "没找到图捏，稍后再试";
+      await diag(env, "qqbot", `${action.kind} 取图 0 张 → 回文本`);
+      await sendText(env, target, tip, msgId);
       return;
     }
     await diag(
       env,
       "qqbot",
-      `取图 ${illusts.length} 张，来源=${[...new Set(illusts.map((i) => i.source))].join(",")}，` +
-        `首张=${illusts[0].imageUrl.slice(0, 80)}`,
+      `${action.kind} 取图 ${illusts.length} 张，来源=${[...new Set(illusts.map((i) => i.source))].join(",")}`,
     );
 
     // 同一 msg_id 回复多条必须给不同 msg_seq，否则第 2 张之后会被 QQ 当重复消息丢掉
@@ -131,24 +138,22 @@ export async function handleQQBotWebhook(request: Request, env: Env, ctx: Execut
 
     // 提示词触发返图（与其他平台共用 ondemand 配置）；群 @ 事件本身即已 @机器人
     const od = await getOnDemandConfig(renv);
-    const { hit, tags } = matchTrigger(content, od.triggers);
-    // 诊断：把"事件到没到 / 内容是什么 / 配的触发词 / 有没有命中"一次性记下来，
-    // 线上排查"发了词没反应"时，看这一条就能区分是事件没到、没命中、还是命中后发送失败。
+    const action = od.enabled ? await resolveAction(renv, content) : ({ kind: "menu" } as Action);
+    // 诊断：把"事件到没到 / 内容 / 解析结果"一次性记下来，便于排查"发了词没反应"。
     ctx.waitUntil(
       diag(
         renv,
         "qqbot",
         `收到 ${t} target=${target.slice(0, 16)}… content=${JSON.stringify(content.slice(0, 40))} ` +
-          `msgId=${msgId ? "有" : "无"} od.enabled=${od.enabled} triggers=${JSON.stringify(od.triggers)} ` +
-          `hit=${hit}${hit ? ` tags="${tags}" count=${od.count}` : ""}`,
+          `msgId=${msgId ? "有" : "无"} od.enabled=${od.enabled} action=${action.kind}` +
+          (action.kind === "source" ? `(${action.source.label})` : ""),
       ),
     );
 
-    if (od.enabled && hit) {
-      // 抓图 + 富媒体上传 + 发送耗时可达数秒，QQ 侧会先超时断开连接，
-      // 连接一断 Worker 请求上下文即被取消、发送半途中止（这是"发了关键词没反应"的根因）。
-      // 因此立刻回 200，把重活交给 waitUntil 在后台完成。
-      ctx.waitUntil(replyIllusts(renv, target, tags, od.count, msgId));
+    if (action.kind !== "menu") {
+      // 抓图 + 富媒体上传 + 发送耗时可达数秒，QQ 侧会先超时断开连接，连接一断请求上下文即被取消、
+      // 发送半途中止（这是"发了关键词没反应"的根因）。因此立刻回 200，重活交给 waitUntil。
+      ctx.waitUntil(replyAction(renv, target, action, od.count, msgId));
       return json({});
     }
 
@@ -163,7 +168,8 @@ export async function handleQQBotWebhook(request: Request, env: Env, ctx: Execut
     } else if (first === "/status") {
       await sendText(renv, target, "机器人在线。命令：/start 订阅 · /stop 退订 · /status 状态。", msgId);
     } else {
-      await sendText(renv, target, "可用命令：/start 订阅 · /stop 退订 · /status 状态。", msgId);
+      // 私聊非命令非触发 / 群 @ 无命中 → 返回菜单（列出当前关键词与命令）
+      await sendText(renv, target, await buildMenu(renv), msgId);
     }
   }
   return json({});

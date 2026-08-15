@@ -70,9 +70,11 @@ export interface SourceConfig {
   site?: string; // booru base / RSSHub URL / randompic 站点根地址
   tags?: string; // booru 查询标签（不含 rating，rating 由过滤器统一处理）
   mode?: string; // pixiv 榜单模式；randompic 图片类型（如 v,h,j）
-  limit: number; // 每次取前 N 条
+  limit: number; // 每次取前 N 条（pixiv 全部模式下作为「每批张数」）
   trusted?: boolean; // 可信来源，跳过全年龄过滤（RSS 订阅默认 true）
   sortOrder?: number;
+  trigger?: string; // 该源专属触发词，命中只发此源；空=不单独触发
+  pushAll?: boolean; // 仅 pixiv：true=全部(分批推、记录进度)，false=部分(取前 limit)
 }
 
 /** 应用配置（默认值 + KV 覆盖） */

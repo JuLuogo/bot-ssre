@@ -119,7 +119,8 @@
     </p>
     <div class="form-grid">
       <label class="chk"><input type="checkbox" id="od_enabled" /> 启用</label>
-      <label class="f">触发词（逗号分隔）<input type="text" id="od_triggers" placeholder="涩图, 色图, 来张图, /setu" /></label>
+      <label class="f">随机图触发词（逗号分隔）<input type="text" id="od_triggers" placeholder="涩图, 色图, 来张图, /setu" /></label>
+      <label class="f">榜单触发词（逗号分隔）<input type="text" id="od_ranktriggers" placeholder="排行, 榜单, pixiv" /></label>
       <label class="f">每次张数<input type="number" id="od_count" value="1" min="1" max="20" /></label>
       <label class="chk"><input type="checkbox" id="od_at" /> 群聊需 @机器人</label>
       <label class="chk"><input type="checkbox" id="od_private" /> 响应私聊</label>
@@ -174,6 +175,12 @@
       <label class="f">tags（booru）<input type="text" id="f_tags" placeholder="sort:score:desc" /></label>
       <label class="f">mode（pixiv）<input type="text" id="f_mode" placeholder="daily / weekly / monthly" /></label>
       <label class="f">每次取 N<input type="number" id="f_limit" value="5" min="1" max="30" /></label>
+      <label class="f">触发词（可选）<input type="text" id="f_trigger" placeholder="如 pixiv / 猫娘，命中只发此源" /></label>
+      <label class="f" id="f_pushall_wrap" style="display:none">推送范围（pixiv）
+        <select id="f_pushall">
+          <option value="0">部分（取前 N 张）</option>
+          <option value="1">全部（分批推、记录进度）</option>
+        </select></label>
       <label class="chk"><input type="checkbox" id="f_trusted" /> 可信（跳过全年龄过滤）</label>
       <label class="chk"><input type="checkbox" id="f_enabled" checked /> 启用</label>
       <input type="hidden" id="f_id" />
@@ -373,6 +380,7 @@ function updateSrcHint() {
   const a = $("f_adapter").value;
   $("srcHint").textContent = ADAPTER_HINT[a] || "";
   $("f_provider_wrap").style.display = a === "randomapi" ? "" : "none";
+  $("f_pushall_wrap").style.display = a === "pixiv" ? "" : "none";
 }
 
 async function loadSources() {
@@ -382,7 +390,7 @@ async function loadSources() {
     <tr>
       <td><input type="checkbox" ${s.enabled ? "checked" : ""} onchange="toggleSource(${s.id}, this.checked)"></td>
       <td><span class="tag">${esc(s.adapter)}</span></td>
-      <td>${esc(s.label)}</td>
+      <td>${esc(s.label)}${s.trigger ? ` <span class="tag">🎯${esc(s.trigger)}</span>` : ""}${s.adapter === "pixiv" && s.pushAll ? ' <span class="tag">全部</span>' : ""}</td>
       <td class="muted">${esc(s.site || s.tags || s.mode || "")}</td>
       <td>${s.limit}</td>
       <td>${s.trusted ? "✓" : ""}</td>
@@ -398,6 +406,7 @@ function editSource(id) {
   $("f_id").value = s.id; $("f_adapter").value = s.adapter; $("f_label").value = s.label || "";
   $("f_site").value = s.site || ""; $("f_tags").value = s.tags || ""; $("f_mode").value = s.mode || "";
   $("f_limit").value = s.limit || 5; $("f_trusted").checked = !!s.trusted; $("f_enabled").checked = !!s.enabled;
+  $("f_trigger").value = s.trigger || ""; $("f_pushall").value = s.pushAll ? "1" : "0";
   if (s.adapter === "randomapi" && s.site) $("f_provider").value = s.site;
   $("srcFormTitle").textContent = "编辑数据源 #" + s.id;
   updateSrcHint();
@@ -405,6 +414,7 @@ function editSource(id) {
 function resetForm() {
   $("f_id").value = ""; $("f_label").value = ""; $("f_site").value = ""; $("f_tags").value = ""; $("f_mode").value = "";
   $("f_limit").value = 5; $("f_trusted").checked = false; $("f_enabled").checked = true;
+  $("f_trigger").value = ""; $("f_pushall").value = "0";
   $("srcFormTitle").textContent = "新增数据源";
   updateSrcHint();
 }
@@ -419,6 +429,8 @@ async function saveSource() {
     limit: Number($("f_limit").value) || 5,
     trusted: $("f_trusted").checked,
     enabled: $("f_enabled").checked,
+    trigger: $("f_trigger").value.trim() || undefined,
+    pushAll: adapter === "pixiv" && $("f_pushall").value === "1",
   };
   if (adapter === "randomapi") {
     const p = PROVIDERS.find((x) => x.slug === $("f_provider").value);
@@ -532,15 +544,18 @@ async function loadOndemand() {
   const c = d.config || {};
   $("od_enabled").checked = !!c.enabled;
   $("od_triggers").value = (c.triggers || []).join(", ");
+  $("od_ranktriggers").value = (c.rankingTriggers || []).join(", ");
   $("od_count").value = c.count ?? 1;
   $("od_at").checked = c.requireAtInGroup !== false;
   $("od_private").checked = c.allowPrivate !== false;
 }
 async function saveOndemand() {
   const triggers = $("od_triggers").value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  const rankingTriggers = $("od_ranktriggers").value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
   const d = await api("/api/ondemand", "POST", {
     enabled: $("od_enabled").checked,
     triggers,
+    rankingTriggers,
     count: Number($("od_count").value) || 1,
     requireAtInGroup: $("od_at").checked,
     allowPrivate: $("od_private").checked,
