@@ -188,7 +188,7 @@ export async function sendImage(
   // QQ 国内服务器拉不动慢反代（pixiv 回源冷启动 10s+ → 40093007）。对这类图先经 Worker
   // 下载存 R2、改用 bot 自己的秒回静态地址 /img/<key> 交给 QQ；QQ 在 /files 阶段取走后即删，
   // 不常驻存储。后台画廊仍用原反代地址预览（管理员浏览器能直接访问，无需中转）。
-  const { url: qqUrl, relayKey } = await resolveQQUrl(env, illust.imageUrl);
+  const { url: qqUrl, relayKey } = await resolveQQUrl(env, illust);
 
   let fileInfo: string;
   try {
@@ -223,20 +223,22 @@ export async function sendImage(
 
 /**
  * 决定发给 QQ 的图片 URL。
- * 若图片来自 QQ 拉不动的慢反代（host == PIXIV_PROXY_HOST），必须经 Worker 中转（下载存 R2 → /img/<key>）；
- * 此时若缺少中转前提（未配 PUBLIC_BASE_URL、或下载/存储失败），**直接抛清晰错误**，
- * 而不是把注定 40093007 的原图直链发给 QQ——否则你只会看到一句含糊的「富媒体下载失败」。
+ * pixiv 图（无论经哪种反代/API，QQ 都拉不动）必须经 Worker 中转（下载存 R2 → /img/<key>）；
+ * 另外凡 host == PIXIV_PROXY_HOST 的也中转。判定用 illust.source==="pixiv" 而非只靠 host 字符串，
+ * 因为 PIXIV_API_BASE 若是 PixivNow 类实例，返回的图片域名并不是 i.pximg.net 也不是 PIXIV_PROXY_HOST。
+ * 需中转却缺前提（未配 PUBLIC_BASE_URL、或下载/存储失败）时**直接抛清晰错误**，不发注定 40093007 的原图。
  * 其它源（随机图/booru，QQ 能直接拉到）原样返回，不中转。
  */
-async function resolveQQUrl(env: Env, imageUrl: string): Promise<{ url: string; relayKey: string | null }> {
+async function resolveQQUrl(env: Env, illust: Illust): Promise<{ url: string; relayKey: string | null }> {
+  const imageUrl = illust.imageUrl;
   const host = (env.PIXIV_PROXY_HOST || "").trim();
-  const needsRelay = !!host && imageUrl.includes(host);
+  const needsRelay = illust.source === "pixiv" || (!!host && imageUrl.includes(host));
   if (!needsRelay) return { url: imageUrl, relayKey: null };
 
   const base = (env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
   if (!base) {
     throw new Error(
-      "该图来自慢反代、QQ 拉不动，需经 Worker 中转，但未配置 PUBLIC_BASE_URL" +
+      "该图 QQ 拉不动、需经 Worker 中转，但未配置 PUBLIC_BASE_URL" +
         "（后台『凭证』填 bot 对外可达地址，如 https://bot-ces.060730.xyz）",
     );
   }
