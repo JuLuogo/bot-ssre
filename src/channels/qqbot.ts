@@ -232,7 +232,10 @@ export async function sendImage(
 async function resolveQQUrl(env: Env, illust: Illust): Promise<{ url: string; relayKey: string | null }> {
   const imageUrl = illust.imageUrl;
   const host = (env.PIXIV_PROXY_HOST || "").trim();
-  const needsRelay = illust.source === "pixiv" || (!!host && imageUrl.includes(host));
+  // 开关：后台把 PIXIV_QQ_RELAY 设为 "off" 即不中转，直接把图（已改用 PIXIV_PROXY_HOST）发给 QQ，
+  // 用来验证「自有反代域名 QQ 是否拉得动」。默认（未设/非 off）走中转。
+  const relayOn = (env.PIXIV_QQ_RELAY || "").trim().toLowerCase() !== "off";
+  const needsRelay = relayOn && (illust.source === "pixiv" || (!!host && imageUrl.includes(host)));
   if (!needsRelay) return { url: imageUrl, relayKey: null };
 
   const base = (env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");

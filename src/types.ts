@@ -10,6 +10,7 @@ export interface Env {
   // 以下为 secret（wrangler secret put）/ 可后台配的凭证，本地可用 .dev.vars
   PIXIV_API_BASE?: string; // Pixiv 榜单 API 反代 base（绕开 Cloudflare IP 被 Pixiv 封）；留空直连 www.pixiv.net
   PUBLIC_BASE_URL?: string; // bot 对外可达的基址（如 https://bot-ces.060730.xyz），用于拼中转图地址；须是 QQ 能访问到的域名
+  PIXIV_QQ_RELAY?: string; // "off" = 不给 QQ 走图片中转（直接发 PIXIV_PROXY_HOST 图，用于测试自有反代 QQ 是否可达）；默认走中转
   TG_BOT_TOKEN?: string;
   NAPCAT_BASE_URL?: string;
   NAPCAT_TOKEN?: string;

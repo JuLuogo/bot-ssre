@@ -23,6 +23,23 @@ const PIXIV_BROWSER_HEADERS: Record<string, string> = {
   "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7",
 };
 
+/**
+ * 把榜单返回的图片地址整体改用 PIXIV_PROXY_HOST（换掉 origin，保留路径）。
+ * 不能只 `replace("i.pximg.net")`：若 PIXIV_API_BASE 是 PixivNow 类实例，返回的图片域名
+ * 已被它换成自家代理（路径仍是 pximg 路径），此时应统一改回后台配置的自有反代域名。
+ */
+function toProxyUrl(rawUrl: string, host: string): string {
+  if (!host) return rawUrl;
+  try {
+    const u = new URL(rawUrl);
+    u.protocol = "https:";
+    u.host = host;
+    return u.toString();
+  } catch {
+    return rawUrl.replace("i.pximg.net", host);
+  }
+}
+
 export const pixiv: SourceAdapter = {
   name: "pixiv",
   async fetchRanking(env: Env, opts: SourceOptions): Promise<Illust[]> {
@@ -55,7 +72,7 @@ export const pixiv: SourceAdapter = {
           id: String(c.illust_id),
           title: c.title || `#${c.illust_id}`,
           author: c.user_name || "",
-          imageUrl: String(c.url || "").replace("i.pximg.net", host),
+          imageUrl: toProxyUrl(String(c.url || ""), host),
           pageUrl: `https://www.pixiv.net/artworks/${c.illust_id}`,
           rating: safe ? "safe" : (ct.sexual ?? 0) >= 2 ? "explicit" : "questionable",
           score: Number(c.view_count) || 0,
