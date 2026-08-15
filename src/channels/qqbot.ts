@@ -1,6 +1,7 @@
 // QQ 官方机器人（QQ 开放平台 API v2）推送渠道：
 // access_token（KV 缓存）→ 富媒体 URL 上传取 file_info → msg_type=7 发图。
 import type { ChannelAdapter, Env, Illust } from "../types";
+import { stageImage, dropImage } from "../relay";
 
 const API = "https://api.bot.qq.com";
 const TOKEN_KEY = "qqbot:token";
@@ -183,7 +184,19 @@ export async function sendImage(
   if (!illust.imageUrl) throw new Error("imageUrl 为空");
   const token = await getAccessToken(env);
   const { scope, openid } = parseTarget(target);
-  const fileInfo = await uploadMedia(token, scope, openid, illust.imageUrl);
+
+  // QQ 国内服务器拉不动慢反代（pixiv 回源冷启动 10s+ → 40093007）。对这类图先经 Worker
+  // 下载存 R2、改用 bot 自己的秒回静态地址 /img/<key> 交给 QQ；QQ 在 /files 阶段取走后即删，
+  // 不常驻存储。后台画廊仍用原反代地址预览（管理员浏览器能直接访问，无需中转）。
+  const relayKey = await maybeStageForQQ(env, illust.imageUrl);
+  const qqUrl = relayKey ? `${(env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "")}/img/${relayKey}` : illust.imageUrl;
+
+  let fileInfo: string;
+  try {
+    fileInfo = await uploadMedia(token, scope, openid, qqUrl);
+  } finally {
+    if (relayKey) await dropImage(env, relayKey); // QQ 已取走，中转对象即刻删除
+  }
 
   const send = async (withContent: boolean): Promise<{ ok: boolean; txt: string }> => {
     const body: Record<string, unknown> = { msg_type: 7, media: { file_info: fileInfo } };
@@ -207,4 +220,15 @@ export async function sendImage(
   if (!retry.ok) {
     throw new Error(`QQ 官方发送失败: ${explainQQError(first.txt)} ｜ 仅图片重试: ${explainQQError(retry.txt)}`);
   }
+}
+
+/**
+ * 仅当图片来自 QQ 拉不动的慢反代（host == PIXIV_PROXY_HOST）且配了 PUBLIC_BASE_URL 时，
+ * 下载存 R2 返回 key（供拼 /img/<key>）；否则返回 null（随机图/booru QQ 能直接拉，不中转）。
+ */
+async function maybeStageForQQ(env: Env, imageUrl: string): Promise<string | null> {
+  const host = (env.PIXIV_PROXY_HOST || "").trim();
+  const base = (env.PUBLIC_BASE_URL || "").trim();
+  if (!host || !base || !imageUrl.includes(host)) return null;
+  return stageImage(env, imageUrl);
 }

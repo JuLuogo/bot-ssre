@@ -97,19 +97,21 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 QQ 国内服务器拉不动慢反代（pixiv 回源冷启动 10s+ → `40093007 富媒体文件下载失败`），而随机图（含
 自有 `pic.060730.xyz` 静态图）秒回、QQ 能拉到。QQ 接口只收 URL、不收字节（已查官方 botpy SDK 证实）。
 
-- 新增 R2 桶 `bot-ssre-relay`（`wrangler.jsonc` 靠自动开通；换账号首次部署若未自动建，
-  用 `npx wrangler r2 bucket create bot-ssre-relay`）。
-- `src/relay.ts`：`stageImage` 下载图片存 R2 → `serveImage` 经**公开路由 `GET /img/<key>`** 秒回 →
-  `pruneOld` 每日 cron 清理超 `RELAY_RETENTION_DAYS`(30) 天的对象。key 为 128bit 随机不可枚举。
-- `pipeline.relayIfNeeded`：仅当图片 host == `PIXIV_PROXY_HOST` 且配了 `PUBLIC_BASE_URL` 时中转，
-  把 `imageUrl` 换成 `{PUBLIC_BASE_URL}/img/<key>`，供所有渠道**和画廊记录**共用（画廊回看不再失效）。
-  随机图/booru（QQ 能直接拉）不中转，不占 R2。
-- 新增可后台配的凭证 `PUBLIC_BASE_URL`（如 `https://bot-ces.060730.xyz`，须是 QQ 能访问到的域名）。
-- **为什么不用第三方免费图床**：QQ 拉图的硬约束是「国内可达 + 快」。ImgBB/SM.MS 等境外免费床国内不稳、
-  且有存活期/内容条款风险；国内床（七牛/又拍）要实名+备案域名。而用户自己的 `bot-ces.060730.xyz`
-  已验证对 QQ 可达（同 `pic.060730.xyz`），R2 免费 10GB + 出站免费，自有可控，是更优解。
+**中转只为喂 QQ，发完即删、不存图**。关键取舍：管理员浏览器能直接访问反代（`i.060730.xyz`），
+所以**后台画廊直接用原反代地址预览**，中转图不必保留——因此推送记录里存的是原图地址，不是 `/img/<key>`。
 
-**待线上验证**：设 `PUBLIC_BASE_URL` 后触发/推送 pixiv 图，QQ 应能收到；后台画廊能预览 `/img/<key>`。
+- 新增 R2 桶 `bot-ssre-relay`（`wrangler.jsonc` 靠自动开通；换账号首次若没自动建，
+  用 `npx wrangler r2 bucket create bot-ssre-relay`）。
+- `src/relay.ts`：`stageImage` 下载存 R2 → **公开路由 `GET /img/<key>`**（`serveImage`）秒回 →
+  `dropImage` 发送后立即删。`pruneOrphans` 每日 cron 只兜底清 6 小时以上的崩溃孤儿。key 128bit 随机不可枚举。
+- 中转逻辑在**渠道层**（`channels/qqbot.ts` 的 `sendImage`→`maybeStageForQQ`）：仅当图片 host ==
+  `PIXIV_PROXY_HOST` 且配了 `PUBLIC_BASE_URL` 时中转，QQ 发 `{PUBLIC_BASE_URL}/img/<key>`，`finally` 里删。
+  其它渠道（TG 全球可达）和画廊记录都用原图地址，pipeline 不参与中转。
+- 新增可后台配的凭证 `PUBLIC_BASE_URL`（如 `https://bot-ces.060730.xyz`，须是 QQ 能访问到的域名）。
+- **为什么不用第三方免费图床 / 为什么不存图**：QQ 拉图要「国内可达 + 快」，境外免费床国内不稳且有存活/条款风险；
+  而中转的唯一目的就是喂 QQ 那一下，喂完 QQ 已存到自己服务器（`/files` 阶段取走），R2 副本即可丢，常驻≈0。
+
+**待线上验证**：设 `PUBLIC_BASE_URL` 后触发/推送 pixiv 图，QQ 应能收到；画廊用原反代地址预览正常。
 
 
 ## 关键事实（勿再踩坑 / 勿再猜）

@@ -8,7 +8,7 @@ import { handleOneBotWebhook } from "./onebot_webhook";
 import { alreadyExecuted } from "./store";
 import { resolveEnv } from "./creds";
 import { isAuthed, loginResponse } from "./auth";
-import { serveImage, pruneOld } from "./relay";
+import { serveImage, pruneOrphans } from "./relay";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -44,8 +44,8 @@ export default {
     }
     const summary = await runOnce(await resolveEnv(env));
     console.log("[scheduled]", JSON.stringify(summary));
-    // 顺带清理过期的中转图（保留期见 relay.RELAY_RETENTION_DAYS）
-    const pruned = await pruneOld(env);
-    if (pruned) console.log(`[scheduled] 清理中转图 ${pruned} 张`);
+    // 兜底清理中转孤儿图（正常发完即删，这里只清 Worker 崩溃遗留的）
+    const pruned = await pruneOrphans(env);
+    if (pruned) console.log(`[scheduled] 清理中转孤儿图 ${pruned} 张`);
   },
 } satisfies ExportedHandler<Env>;
