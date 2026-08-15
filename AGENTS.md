@@ -112,6 +112,22 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 相关凭证：`PIXIV_API_BASE`(榜单 API 反代)、`PIXIV_PROXY_HOST`(纯域名，图片反代)、`PIXIV_QQ_RELAY`(off=不中转)、
 `PUBLIC_BASE_URL`(中转出口，仅中转时用)。
 
+## 已完成：源级触发词 + 榜单全部(分批)推 + 菜单兜底（2026-08-16）
+
+三平台（QQ官方/TG/NapCat）统一走 `ondemand.resolveAction(text)`，优先级：
+**源专属触发词 > 大类榜单触发词(`rankingTriggers`) > 全局随机触发词(`triggers`，旧外壳) > 菜单兜底**。
+
+- 迁移 `0007_source_triggers.sql`：`sources` 加 `trigger`(源专属触发词)、`push_all`(仅 pixiv：1=全部分批)。
+  `SourceConfig`/`db.ts`/`api.ts`/后台表单同步。
+- **每个源可设触发词**：命中只发该源；pixiv 源可选「部分(取前 N)/全部(分批)」。
+- **榜单全部=分批推**：`fetchRankingBatch` 把整榜（`pixiv.ts` 改多页抓取，≤10 页≈500）缓存 KV
+  `rankcache:<id>:<date>`，进度 `rankoffset:<id>`，每次触发/定时推一批(chunk=源 limit)、offset 前移、跨天重置、推完停。
+  推进速度取决于触发/定时频率；子请求上限的优雅中止仍兜底。
+- **菜单**：私聊非命令非触发 / 群 @无命中 → `buildMenu` 列出当前源触发词、大类触发词、命令。
+  注意 NapCat 私聊会对每条非触发消息回菜单，嫌吵可关 `allowPrivate`。
+- ondemand 新增导出：`resolveAction`/`fetchFromSource`/`fetchRankingBatch`/`fetchRankingIllusts`/`fetchForAction`/`buildMenu`、`Action` 类型、`rankingTriggers`。
+- 部署会自动 apply 迁移 0007（`d1_migrations` 追踪）；ALTER 非幂等，勿手动重复 apply。
+
 
 ## 关键事实（勿再踩坑 / 勿再猜）
 
