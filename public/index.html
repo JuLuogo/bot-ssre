@@ -129,6 +129,20 @@
   </div>
 
   <div class="card">
+    <h2 class="section-title">🩺 触发诊断（最近 40 条）</h2>
+    <p class="section-desc">
+      记录每条到达的 QQ 消息事件（内容、当前触发词、是否命中）与返图/推送结果。
+      发了触发词没反应时看这里：<b>没有新记录</b> = 事件没推到 Worker（查 QQ 开放平台事件订阅/回调）；
+      <b>hit=false</b> = 触发词没匹配上；<b>有 hit=true 但发送失败</b> = 失败原因就在下一条里。
+    </p>
+    <div class="row">
+      <button class="btn-sm" id="diagRefreshBtn">刷新诊断</button>
+      <button class="btn-sm" id="diagClearBtn">清空</button>
+    </div>
+    <div id="diagList" class="kv" style="margin-top:10px;white-space:pre-wrap;word-break:break-all"></div>
+  </div>
+
+  <div class="card">
     <h2 class="section-title">📚 数据源 / 订阅</h2>
     <p class="section-desc">booru / Pixiv 排行榜按分级过滤后推送；RSS(RSSHub) 视为可信来源，默认跳过全年龄过滤。</p>
     <table>
@@ -521,9 +535,16 @@ async function saveOndemand() {
   $("odMsg").innerHTML = d.ok ? '<span class="okc">已保存。</span>' : `<span class="err">${esc(d.error)}</span>`;
   if (d.ok) toast("触发设置已保存");
 }
+async function loadDiag() {
+  const d = await api("/api/diag");
+  const items = d.items || [];
+  $("diagList").innerHTML = items.length
+    ? items.map((e) => `<div style="padding:4px 0;border-bottom:1px solid rgba(128,128,128,.2)"><b>${fmt(e.ts)}</b> <span class="pill">${esc(e.scope)}</span> ${esc(e.msg)}</div>`).join("")
+    : '<span class="muted">暂无记录。去 QQ 里发一条触发词，然后点「刷新诊断」。</span>';
+}
 async function refreshAll() {
   await loadStatus(); await loadCreds(); await loadProviders(); await loadSources();
-  await loadSubscribers(); await loadRuns(); await loadGallery(); await loadOndemand();
+  await loadSubscribers(); await loadRuns(); await loadGallery(); await loadOndemand(); await loadDiag();
 }
 async function runRandom() {
   const n = Math.max(1, Math.min(20, Number($("randCount").value) || 5));
@@ -538,11 +559,13 @@ async function runRandom() {
       (s.errors && s.errors.length ? `<div class="err" style="margin-top:6px">${s.errors.slice(0, 12).map(esc).join("<br>")}</div>` : "");
     toast(`随机推送完成：成功 ${s.pushed}/${s.fetched} 张` + (s.errors && s.errors.length ? `（${s.errors.length} 条错误，详见下方）` : ""));
   } catch (e) { toast(String(e), true); }
-  finally { btn.disabled = false; btn.textContent = old; await loadRuns(); await loadGallery(); }
+  finally { btn.disabled = false; btn.textContent = old; await loadRuns(); await loadGallery(); await loadDiag(); }
 }
 window.runRandom = runRandom;
 $("runBtn").onclick = runNow;
 $("randBtn").onclick = runRandom;
+$("diagRefreshBtn").onclick = async () => { await loadDiag(); toast("诊断已刷新"); };
+$("diagClearBtn").onclick = async () => { await api("/api/diag", "DELETE"); await loadDiag(); toast("已清空"); };
 $("refreshBtn").onclick = async () => { await refreshAll(); toast("已刷新"); };
 $("logoutBtn").onclick = async () => { try { await api("/api/logout", "POST"); } finally { location.reload(); } };
 $("srcSaveBtn").onclick = saveSource;

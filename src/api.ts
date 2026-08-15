@@ -17,6 +17,7 @@ import { getAccessToken } from "./channels/qqbot";
 import { isAuthed, checkPassword, buildSessionCookie, buildClearCookie } from "./auth";
 import { getOnDemandConfig, setOnDemandConfig, type OnDemandConfig } from "./ondemand";
 import { listProviderMeta, getProvider } from "./sources/randomapi_providers";
+import { listDiag, clearDiag } from "./diag";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -195,6 +196,15 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
   // 第三方随机图 API 注册表（后台下拉用；只读）
   if (pathname === "/api/providers" && method === "GET") {
     return json({ ok: true, items: listProviderMeta() });
+  }
+
+  // 诊断日志（KV 环形缓冲）：排查"发了触发词没反应"用
+  if (pathname === "/api/diag") {
+    if (method === "GET") return json({ ok: true, items: await listDiag(env) });
+    if (method === "DELETE") {
+      await clearDiag(env);
+      return json({ ok: true, items: [] });
+    }
   }
 
   if (pathname === "/api/sources") {

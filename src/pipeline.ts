@@ -10,6 +10,7 @@ import { telegram } from "./channels/telegram";
 import { napcat } from "./channels/napcat";
 import { qqbot } from "./channels/qqbot";
 import { fetchRandomIllusts } from "./ondemand";
+import { diag } from "./diag";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -124,11 +125,17 @@ export async function runOnce(env: Env): Promise<RunSummary> {
 
   summary.finishedAt = Date.now();
   await recordRun(env, summary);
+  await diag(
+    env,
+    "push",
+    `定时/手动抓取 拉取 ${summary.fetched} 推送 ${summary.pushed}｜${(summary.notes ?? []).join(" / ") || "无可用目标"}` +
+      (summary.errors.length ? `｜错误: ${summary.errors.slice(0, 4).join(" ‖ ")}` : ""),
+  );
   return summary;
 }
 
 /**
- * 手动随机推送：从启用的 booru 源随机取 count 张全年龄图，推到所有启用渠道。
+ * 手动随机推送：随机取 count 张全年龄图，推到所有启用渠道。
  * 不做去重（强制推），每次内容基本不同；仍写入推送记录供网页展示。
  */
 export async function pushRandomBatch(env: Env, count: number): Promise<RunSummary> {
@@ -173,5 +180,11 @@ export async function pushRandomBatch(env: Env, count: number): Promise<RunSumma
 
   summary.finishedAt = Date.now();
   await recordRun(env, summary);
+  await diag(
+    env,
+    "push",
+    `手动随机推送 取图 ${summary.fetched} 成功 ${summary.pushed}｜${(summary.notes ?? []).join(" / ") || "无可用目标"}` +
+      (summary.errors.length ? `｜错误: ${summary.errors.slice(0, 4).join(" ‖ ")}` : ""),
+  );
   return summary;
 }
