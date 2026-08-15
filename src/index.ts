@@ -14,15 +14,15 @@ export default {
     const url = new URL(request.url);
     // webhook 先合并 D1 凭证，使后台配置的密钥生效
     if (url.pathname === "/tg/webhook" && request.method === "POST") {
-      return handleTelegramWebhook(request, await resolveEnv(env));
+      return handleTelegramWebhook(request, await resolveEnv(env), ctx);
     }
     if (url.pathname === "/qq/webhook" && request.method === "POST") {
       // 传原始 env：op=13 校验走快路径（优先 Worker Secret，不读 D1），事件再在内部 resolveEnv
-      return handleQQBotWebhook(request, env);
+      return handleQQBotWebhook(request, env, ctx);
     }
     // OneBot(NapCat) 上报：传原始 env，命中命令后内部再 resolveEnv，非命令消息不触碰 D1
     if (url.pathname === "/onebot/webhook" && request.method === "POST") {
-      return handleOneBotWebhook(request, env);
+      return handleOneBotWebhook(request, env, ctx);
     }
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
     // 后台页面门禁：未登录一律显示登录页，鉴权后才下发管理 SPA

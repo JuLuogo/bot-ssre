@@ -100,6 +100,7 @@ export async function runOnce(env: Env): Promise<RunSummary> {
   if (channels.length === 0) {
     summary.errors.push("没有可用的推送目标（检查渠道开关、token 与目标 id）");
   }
+  summary.notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
 
   // 4) 逐图推送，成功任一渠道即标记已推送并写记录
   for (const it of picked) {
@@ -149,6 +150,8 @@ export async function pushRandomBatch(env: Env, count: number): Promise<RunSumma
 
   const channels = await assembleChannels(env, cfg);
   if (channels.length === 0) summary.errors.push("没有可用的推送目标（检查渠道开关、token 与目标 id）");
+  // 诊断：把本次真正尝试的目标写出来，便于判断"群里收不到"是发送失败还是根本没在目标里
+  summary.notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
 
   for (const it of illusts) {
     const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);

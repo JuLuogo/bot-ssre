@@ -103,4 +103,6 @@ export interface RunSummary {
   pushed: number;
   errors: string[];
   perSource: Record<string, number>;
+  /** 诊断信息（本次实际尝试的渠道与目标）；只在 API 响应里返回，不入库。 */
+  notes?: string[];
 }

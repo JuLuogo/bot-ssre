@@ -100,3 +100,25 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 - Worker：`bot-ssre`；后台 `https://bot-ssre.juluogogo.workers.dev`（或 `https://bot-ces.060730.xyz`）。
 - `randompic`(commit `26744d9`) 与 `randomapi`(commit `8519d1f`) 均已推送 origin/main。
 - 本会话 `cloudflare-builds` / `cloudflare-observability` MCP 断开；`cloudflare-bindings` 可用。工作区 `.claude/` 未跟踪（计划/临时目录，勿提交）。
+
+## 进行中：QQ 官方「触发词无反应 / 群聊收不到推送」修复（2026-08-15）
+
+用户实测症状：① 私聊发触发词无任何反应；② 后台「推送随机新图」能到私聊，**群聊收不到**；③ `/start` 能正常回复。
+
+已定位并修复（本地 `npx tsc --noEmit` ✅、`wrangler deploy --dry-run` ✅、matchTrigger 13 例单测全 PASS）：
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| 触发词无反应 | webhook 里同步做「抓图 + 富媒体上传 + 发送」耗时数秒，QQ/TG/NapCat 侧先超时断连 → Worker 请求上下文被取消，发送半途中止（`/start` 只发文本很快所以正常） | 三个 webhook 全部改为**立刻回 200 + `ctx.waitUntil()` 后台完成**（`qqbot_webhook.ts` / `telegram_bot.ts` / `onebot_webhook.ts`，入口 `index.ts` 传 `ctx`） |
+| 多张图只到第一张 | 同一 `msg_id` 被动回复必须带**不同 `msg_seq`**，否则被 QQ 当重复消息丢弃 | `sendImage`/`sendText` 增加 `msgSeq` 参数，返图循环里递增 |
+| 群聊收不到主动推送 | QQ 官方对**群主动消息**有报备/频次限制（被动回复不受限） | 记住该会话最近 msg_id（KV `qqbot:lastmsg:<target>`，TTL 270s），`qqbot.push` **优先按被动回复发**，失败再退回主动消息 |
+| 看不到失败原因 | 「推送随机新图」只 toast 错误条数；错误文本是英文原始 JSON | `explainQQError()` 按 message 关键字补中文提示（不硬编码官方码值，原始返回保留）；后台推送结果**直接展开错误列表**，并新增 `summary.notes` 显示本次实际尝试的渠道与目标（可判断群是不是根本没进目标列表） |
+| 发「色图」不触发 | 后台触发词是「涩图」，与「色图」是不同汉字 | `matchTrigger` 归一化：**色/涩 同字**、ASCII 大小写、全角空格、开头残留 `@xxx`；默认触发词补 `色图`、`来张图`（关键词 tag 仍取原文，不改写） |
+
+**待线上验证（部署后按序）：**
+1. 私聊发「涩图」/「色图」→ 应返图（若仍无反应，看后台运行历史/日志）。
+2. 群里 @机器人 发触发词 → 应返图（被动回复，不占额度）。
+3. **群里先随便发一条消息**，5 分钟内点后台「推送随机新图」→ 应能进群（走被动窗口）；结果区会列出 `qqbot 目标(N): group:… , user:…` 与失败原因。
+4. 若群里 5 分钟窗口外仍收不到，且错误提示「主动消息待审核/未报备」→ 需去 QQ 开放平台申请群主动消息额度，这是平台限制而非代码问题。
+5. randompic / randomapi 的线上验证（见上一节待办）仍未做。
+

@@ -1,7 +1,7 @@
 // QQ 官方机器人 webhook：op=13 回调地址验证、事件验签、订阅命令处理。
 import type { Env } from "./types";
 import { subscribe, unsubscribe } from "./db";
-import { sendText, sendImage } from "./channels/qqbot";
+import { sendText, sendImage, rememberPassiveMsgId } from "./channels/qqbot";
 import { signQQValidation, verifyQQSignature } from "./qqsign";
 import { resolveEnv } from "./creds";
 import { getOnDemandConfig, fetchRandomIllusts, matchTrigger } from "./ondemand";
@@ -16,7 +16,35 @@ interface QQPayload {
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
-export async function handleQQBotWebhook(request: Request, env: Env): Promise<Response> {
+/** 后台完成「抓图 → 发送」，全程吞异常：webhook 已经回过 200，这里失败只留日志。 */
+async function replyIllusts(
+  env: Env,
+  target: string,
+  tags: string,
+  count: number,
+  msgId?: string,
+): Promise<void> {
+  try {
+    const illusts = await fetchRandomIllusts(env, tags, count);
+    if (illusts.length === 0) {
+      await sendText(env, target, tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试", msgId);
+      return;
+    }
+    // 同一 msg_id 回复多条必须给不同 msg_seq，否则第 2 张之后会被 QQ 当重复消息丢掉
+    let seq = 1;
+    for (const il of illusts) {
+      try {
+        await sendImage(env, target, il, msgId, seq++);
+      } catch (e) {
+        console.warn("[qqbot] 发图失败:", e instanceof Error ? e.message : String(e));
+      }
+    }
+  } catch (e) {
+    console.warn("[qqbot] 按需返图异常:", e instanceof Error ? e.message : String(e));
+  }
+}
+
+export async function handleQQBotWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const raw = await request.text();
   let payload: QQPayload;
   try {
@@ -69,27 +97,19 @@ export async function handleQQBotWebhook(request: Request, env: Env): Promise<Re
     const content = String(d.content ?? "").trim();
     const msgId = typeof d.id === "string" ? d.id : undefined;
 
+    // 记住最近一条消息的 msg_id：后台手动推送/定时推送可在 5 分钟窗口内按被动回复发出，
+    // 绕开 QQ 官方对「主动消息」的报备与频次限制。
+    if (msgId) ctx.waitUntil(rememberPassiveMsgId(renv, target, msgId));
+
     // 提示词触发返图（与其他平台共用 ondemand 配置）；群 @ 事件本身即已 @机器人
     const od = await getOnDemandConfig(renv);
     if (od.enabled) {
       const { hit, tags } = matchTrigger(content, od.triggers);
       if (hit) {
-        try {
-          const illusts = await fetchRandomIllusts(renv, tags, od.count);
-          if (illusts.length === 0) {
-            await sendText(renv, target, tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试", msgId);
-          } else {
-            for (const il of illusts) {
-              try {
-                await sendImage(renv, target, il, msgId);
-              } catch (e) {
-                console.warn("[qqbot] 发图失败:", e instanceof Error ? e.message : String(e));
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("[qqbot] 按需返图异常:", e instanceof Error ? e.message : String(e));
-        }
+        // 抓图 + 富媒体上传 + 发送耗时可达数秒，QQ 侧会先超时断开连接，
+        // 连接一断 Worker 请求上下文即被取消、发送半途中止（这是"发了关键词没反应"的根因）。
+        // 因此立刻回 200，把重活交给 waitUntil 在后台完成。
+        ctx.waitUntil(replyIllusts(renv, target, tags, od.count, msgId));
         return json({});
       }
     }

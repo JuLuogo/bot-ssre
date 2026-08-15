@@ -21,7 +21,33 @@ async function sendMessage(env: Env, apiBase: string, chatId: string, text: stri
   }).catch(() => {});
 }
 
-export async function handleTelegramWebhook(request: Request, env: Env): Promise<Response> {
+/** 后台完成「抓图 → 发图」，异常只记日志（webhook 已回 ok）。 */
+async function replyIllusts(
+  env: Env,
+  apiBase: string,
+  chatId: string,
+  tags: string,
+  count: number,
+): Promise<void> {
+  try {
+    const illusts = await fetchRandomIllusts(env, tags, count);
+    if (illusts.length === 0) {
+      await sendMessage(env, apiBase, chatId, tags ? `没找到「${tags}」相关的图` : "没找到图，稍后再试");
+      return;
+    }
+    for (const il of illusts) {
+      try {
+        await telegram.push(env, il, chatId, { apiBase });
+      } catch (e) {
+        console.warn("[tg] 发图失败:", e instanceof Error ? e.message : String(e));
+      }
+    }
+  } catch (e) {
+    console.warn("[tg] 按需返图异常:", e instanceof Error ? e.message : String(e));
+  }
+}
+
+export async function handleTelegramWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   // 校验 setWebhook 时设置的 secret_token
   if (env.TG_WEBHOOK_SECRET) {
     if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TG_WEBHOOK_SECRET) {
@@ -49,18 +75,9 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     const isGroup = (chat.type || "").includes("group");
     // 群里靠 Telegram 隐私模式过滤（只有 @机器人/命令/回复才会收到）；私聊需 allowPrivate
     if (hit && (isGroup || od.allowPrivate)) {
-      const illusts = await fetchRandomIllusts(env, tags, od.count);
-      if (illusts.length === 0) {
-        await sendMessage(env, apiBase, chatId, tags ? `没找到「${tags}」相关的图` : "没找到图，稍后再试");
-      } else {
-        for (const il of illusts) {
-          try {
-            await telegram.push(env, il, chatId, { apiBase });
-          } catch (e) {
-            console.warn("[tg] 发图失败:", e instanceof Error ? e.message : String(e));
-          }
-        }
-      }
+      // 抓图+发图可能数秒；Telegram 超时会重推同一 update 导致重复发图。
+      // 立刻回 ok，重活交给 waitUntil。
+      ctx.waitUntil(replyIllusts(env, apiBase, chatId, tags, od.count));
       return new Response("ok");
     }
   }

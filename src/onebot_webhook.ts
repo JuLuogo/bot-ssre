@@ -64,7 +64,7 @@ async function verifySignature(secret: string, sigHeader: string, raw: string): 
   return hex === expected;
 }
 
-export async function handleOneBotWebhook(request: Request, env: Env): Promise<Response> {
+export async function handleOneBotWebhook(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const raw = await request.text();
   let ev: OneBotEvent;
   try {
@@ -100,21 +100,33 @@ export async function handleOneBotWebhook(request: Request, env: Env): Promise<R
 
   const groupId = String(ev.group_id ?? "");
   const userId = String(ev.user_id ?? "");
+  // 抓图+发图可能数秒，NapCat 侧超时会重推同一事件；立刻回 200，重活交给 waitUntil。
+  ctx.waitUntil(replyIllusts(renv, isGroup, groupId, userId, tags, od.count));
+  return okJson();
+}
+
+/** 后台完成「抓图 → 发图」，异常只记日志（上报已回 200）。 */
+async function replyIllusts(
+  env: Env,
+  isGroup: boolean,
+  groupId: string,
+  userId: string,
+  tags: string,
+  count: number,
+): Promise<void> {
   try {
-    const illusts = await fetchRandomIllusts(renv, tags, od.count);
+    const illusts = await fetchRandomIllusts(env, tags, count);
     if (illusts.length === 0) {
       const tip = tags ? `没找到「${tags}」相关的图捏` : "没找到图捏，稍后再试";
-      if (isGroup) await sendGroupText(renv, groupId, tip);
-      else await sendPrivateText(renv, userId, tip);
-      return okJson();
+      if (isGroup) await sendGroupText(env, groupId, tip);
+      else await sendPrivateText(env, userId, tip);
+      return;
     }
     for (const illust of illusts) {
-      if (isGroup) await sendGroupImage(renv, groupId, illust);
-      else await sendPrivateImage(renv, userId, illust);
+      if (isGroup) await sendGroupImage(env, groupId, illust);
+      else await sendPrivateImage(env, userId, illust);
     }
   } catch (e) {
-    // 出错也回 200，避免 NapCat 触发重试风暴
     console.log("[onebot] error:", e instanceof Error ? e.message : String(e));
   }
-  return okJson();
 }

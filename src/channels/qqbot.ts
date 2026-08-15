@@ -4,6 +4,9 @@ import type { ChannelAdapter, Env, Illust } from "../types";
 
 const API = "https://api.bot.qq.com";
 const TOKEN_KEY = "qqbot:token";
+// 被动回复窗口：官方 msg_id 有效期 5 分钟，留 30s 余量
+const PASSIVE_TTL = 270;
+const passiveKey = (target: string) => `qqbot:lastmsg:${target}`;
 
 interface TokenCache {
   token: string;
@@ -48,6 +51,48 @@ const authHeaders = (token: string) => ({
   "Content-Type": "application/json; charset=utf-8",
 });
 
+/**
+ * 记住某个会话最近一条用户消息的 msg_id。
+ * QQ 官方「主动消息」对群/单聊有报备与频次限制，而带 msg_id 的被动回复不受该限制；
+ * 后台手动推送/定时推送时若窗口内（5 分钟）有可用 msg_id，就优先按被动回复发出。
+ */
+export async function rememberPassiveMsgId(env: Env, target: string, msgId: string): Promise<void> {
+  try {
+    await env.KV.put(passiveKey(target), msgId, { expirationTtl: PASSIVE_TTL });
+  } catch {
+    // 记不住就退化为主动消息，不影响主流程
+  }
+}
+
+async function getPassiveMsgId(env: Env, target: string): Promise<string | undefined> {
+  try {
+    return (await env.KV.get(passiveKey(target))) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 给 QQ 返回体补一句中文提示，便于后台「运行历史」直接看懂失败原因。
+ * 按返回体里的英文 message 关键字做匹配（官方错误码表随版本变动，这里不硬编码码值），
+ * 原始返回始终保留在后面。
+ */
+export function explainQQError(txt: string): string {
+  const lower = txt.toLowerCase();
+  const rules: Array<[RegExp, string]> = [
+    [/waiting for audit|audit/, "主动消息待审核/未报备：群主动推送需在 QQ 开放平台申请主动消息额度，否则只能被动回复"],
+    [/freq|frequency|limit|exceed|quota/, "触发频次/额度限制：QQ 对主动消息按月限额，被动回复不占额度"],
+    [/duplicate|repeat/, "被判定为重复消息：同一 msg_id 多次回复需要不同的 msg_seq"],
+    [/download|url|media|file/, "富媒体处理失败：QQ 服务器可能无法下载该图片（域名不可达 / 非直链 / 格式不支持）"],
+    [/permission|denied|forbidden|not allow/, "权限不足：确认机器人已在该群/该用户会话中，且具备对应消息权限"],
+    [/token|auth/, "鉴权失败：检查 QQ_BOT_APPID / QQ_BOT_SECRET"],
+  ];
+  for (const [re, hint] of rules) {
+    if (re.test(lower)) return `${hint}｜原始: ${txt}`;
+  }
+  return txt;
+}
+
 /** 富媒体 URL 上传，换取 file_info（file_type=1 为图片） */
 async function uploadMedia(token: string, scope: string, openid: string, url: string): Promise<string> {
   const res = await fetch(`${API}/v2/${scope}/${openid}/files`, {
@@ -56,7 +101,7 @@ async function uploadMedia(token: string, scope: string, openid: string, url: st
     body: JSON.stringify({ file_type: 1, url, srv_send_msg: false }),
   });
   const txt = await res.text();
-  if (!res.ok) throw new Error(`富媒体上传失败 HTTP ${res.status}: ${txt}`);
+  if (!res.ok) throw new Error(`富媒体上传失败 HTTP ${res.status}: ${explainQQError(txt)}`);
   const j = JSON.parse(txt) as { file_info?: string };
   if (!j.file_info) throw new Error(`富媒体上传未返回 file_info: ${txt}`);
   return j.file_info;
@@ -66,18 +111,21 @@ async function uploadMedia(token: string, scope: string, openid: string, url: st
  * 发文本消息。带 msgId 为被动回复（不占主动消息频次）。
  * best-effort：回复失败只记日志，不抛出——避免 webhook 因回复失败返回 5xx 触发平台重推。
  */
-export async function sendText(env: Env, target: string, content: string, msgId?: string): Promise<void> {
+export async function sendText(env: Env, target: string, content: string, msgId?: string, msgSeq?: number): Promise<void> {
   try {
     const token = await getAccessToken(env);
     const { scope, openid } = parseTarget(target);
     const body: Record<string, unknown> = { msg_type: 0, content };
-    if (msgId) body.msg_id = msgId;
+    if (msgId) {
+      body.msg_id = msgId;
+      body.msg_seq = msgSeq ?? 1;
+    }
     const res = await fetch(`${API}/v2/${scope}/${openid}/messages`, {
       method: "POST",
       headers: authHeaders(token),
       body: JSON.stringify(body),
     });
-    if (!res.ok) console.warn(`[qqbot] sendText 失败 HTTP ${res.status}: ${await res.text()}`);
+    if (!res.ok) console.warn(`[qqbot] sendText 失败 HTTP ${res.status}: ${explainQQError(await res.text())}`);
   } catch (e) {
     console.warn(`[qqbot] sendText 异常: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -97,12 +145,38 @@ function caption(i: Illust): string {
 export const qqbot: ChannelAdapter = {
   name: "qqbot",
   async push(env: Env, illust: Illust, target: string): Promise<void> {
-    await sendImage(env, target, illust);
+    // 优先蹭 5 分钟内的被动回复窗口（不占主动消息额度）；失败再按主动消息发一次
+    const passive = await getPassiveMsgId(env, target);
+    if (!passive) {
+      await sendImage(env, target, illust);
+      return;
+    }
+    try {
+      // 同一 msg_id 多次回复必须给不同 msg_seq，否则被 QQ 去重
+      await sendImage(env, target, illust, passive, 1 + Math.floor(Math.random() * 100000));
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      try {
+        await sendImage(env, target, illust);
+      } catch (e2) {
+        const d2 = e2 instanceof Error ? e2.message : String(e2);
+        throw new Error(`被动回复失败(${detail})；主动消息也失败(${d2})`);
+      }
+    }
   },
 };
 
-/** 发图；带 msgId 为被动回复（不占主动消息频次），用于提示词触发返图。 */
-export async function sendImage(env: Env, target: string, illust: Illust, msgId?: string): Promise<void> {
+/**
+ * 发图；带 msgId 为被动回复（不占主动消息频次），用于提示词触发返图。
+ * msgSeq：同一 msg_id 回复多条时必须递增/不同，否则 QQ 侧按重复消息丢弃。
+ */
+export async function sendImage(
+  env: Env,
+  target: string,
+  illust: Illust,
+  msgId?: string,
+  msgSeq?: number,
+): Promise<void> {
   if (!illust.imageUrl) throw new Error("imageUrl 为空");
   const token = await getAccessToken(env);
   const { scope, openid } = parseTarget(target);
@@ -111,7 +185,10 @@ export async function sendImage(env: Env, target: string, illust: Illust, msgId?
   const send = async (withContent: boolean): Promise<{ ok: boolean; txt: string }> => {
     const body: Record<string, unknown> = { msg_type: 7, media: { file_info: fileInfo } };
     if (withContent) body.content = caption(illust);
-    if (msgId) body.msg_id = msgId;
+    if (msgId) {
+      body.msg_id = msgId;
+      body.msg_seq = msgSeq ?? 1;
+    }
     const res = await fetch(`${API}/v2/${scope}/${openid}/messages`, {
       method: "POST",
       headers: authHeaders(token),
@@ -124,5 +201,7 @@ export async function sendImage(env: Env, target: string, illust: Illust, msgId?
   const first = await send(true);
   if (first.ok) return;
   const retry = await send(false);
-  if (!retry.ok) throw new Error(`QQ 官方发送失败: ${first.txt} ｜ 仅图片重试: ${retry.txt}`);
+  if (!retry.ok) {
+    throw new Error(`QQ 官方发送失败: ${explainQQError(first.txt)} ｜ 仅图片重试: ${explainQQError(retry.txt)}`);
+  }
 }

@@ -115,10 +115,11 @@
     <p class="section-desc">
       在 Telegram / QQ官方 / 个人QQ(NapCat) 里发送触发词即返图（返回全年龄安全向）。群里需 @机器人（QQ/NapCat），私聊直接触发。
       不带关键词时优先使用已启用的静态随机图库；触发词后跟空格 + 关键词时改用 booru tag 检索，例：<code>涩图 原神</code>。
+      匹配对「色 / 涩」不区分（配了<code>涩图</code>，发<code>色图</code>也能触发）。
     </p>
     <div class="form-grid">
       <label class="chk"><input type="checkbox" id="od_enabled" /> 启用</label>
-      <label class="f">触发词（逗号分隔）<input type="text" id="od_triggers" placeholder="涩图, /setu" /></label>
+      <label class="f">触发词（逗号分隔）<input type="text" id="od_triggers" placeholder="涩图, 色图, 来张图, /setu" /></label>
       <label class="f">每次张数<input type="number" id="od_count" value="1" min="1" max="20" /></label>
       <label class="chk"><input type="checkbox" id="od_at" /> 群聊需 @机器人</label>
       <label class="chk"><input type="checkbox" id="od_private" /> 响应私聊</label>
@@ -488,6 +489,7 @@ async function runNow() {
     else {
       const s = d.summary;
       $("runResult").innerHTML = `本次: 拉取 <b>${s.fetched}</b> · 过滤后 <b>${s.filtered}</b> · 推送 <b>${s.pushed}</b>` +
+        (s.notes && s.notes.length ? `<div class="muted" style="margin-top:6px">${s.notes.map(esc).join("<br>")}</div>` : "") +
         (s.errors && s.errors.length ? `<div class="err" style="margin-top:6px">${s.errors.slice(0, 8).map(esc).join("<br>")}</div>` : "");
       toast(`完成：推送 ${s.pushed} 张`);
     }
@@ -528,9 +530,13 @@ async function runRandom() {
   const btn = $("randBtn"); btn.disabled = true; const old = btn.textContent; btn.textContent = "推送中…";
   try {
     const d = await api("/api/push-random?count=" + n, "POST");
-    if (!d.ok) { toast(d.error || "推送失败", true); return; }
+    if (!d.ok) { toast(d.error || "推送失败", true); $("runResult").innerHTML = `<span class="err">${esc(d.error || "推送失败")}</span>`; return; }
     const s = d.summary;
-    toast(`随机推送完成：成功 ${s.pushed}/${s.fetched} 张` + (s.errors && s.errors.length ? `（${s.errors.length} 条错误）` : ""));
+    // 错误直接展开显示：群聊/私聊各目标的失败原因（如 QQ 主动消息未报备）在这里一眼可见
+    $("runResult").innerHTML = `随机推送: 取图 <b>${s.fetched}</b> · 成功 <b>${s.pushed}</b>` +
+      (s.notes && s.notes.length ? `<div class="muted" style="margin-top:6px">${s.notes.map(esc).join("<br>")}</div>` : "") +
+      (s.errors && s.errors.length ? `<div class="err" style="margin-top:6px">${s.errors.slice(0, 12).map(esc).join("<br>")}</div>` : "");
+    toast(`随机推送完成：成功 ${s.pushed}/${s.fetched} 张` + (s.errors && s.errors.length ? `（${s.errors.length} 条错误，详见下方）` : ""));
   } catch (e) { toast(String(e), true); }
   finally { btn.disabled = false; btn.textContent = old; await loadRuns(); await loadGallery(); }
 }

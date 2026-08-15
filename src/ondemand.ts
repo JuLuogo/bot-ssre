@@ -15,7 +15,7 @@ export interface OnDemandConfig {
 
 const DEFAULT_ONDEMAND: OnDemandConfig = {
   enabled: true,
-  triggers: ["涩图", "/setu"],
+  triggers: ["涩图", "色图", "来张图", "/setu"],
   count: 1,
   requireAtInGroup: true,
   allowPrivate: true,
@@ -48,14 +48,33 @@ export async function setOnDemandConfig(env: Env, cfg: OnDemandConfig): Promise<
     .run();
 }
 
+/** 去掉首尾空白（含全角空格）与开头残留的 @机器人 文本。 */
+function clean(s: string): string {
+  return s
+    .replace(/^[\s　]+|[\s　]+$/g, "")
+    .replace(/^@\S+[\s　]*/, "");
+}
+
+/**
+ * 等长归一：把易混的「色」并到「涩」（用户在「涩图」「色图」之间摇摆，配一个就都能触发），
+ * 并做 ASCII 小写。刻意保持与输入等长，使下标可直接用于取关键词。
+ */
+function fold(s: string): string {
+  return s.replace(/色/g, "涩").replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
 /** 命中触发词时返回其后的关键词作为 tag（要求触发词后是空格或结束，避免"涩图集"误触）。 */
 export function matchTrigger(text: string, triggers: string[]): { hit: boolean; tags: string } {
+  const cleaned = clean(text);
+  const folded = fold(cleaned);
   for (const trig of triggers) {
     if (!trig) continue;
-    if (text === trig) return { hit: true, tags: "" };
-    if (text.startsWith(trig)) {
-      const after = text.slice(trig.length);
-      if (/^\s/.test(after)) return { hit: true, tags: after.trim() };
+    const t = fold(clean(trig));
+    if (!t) continue;
+    if (folded === t) return { hit: true, tags: "" };
+    if (folded.startsWith(t) && /^[\s　]/.test(folded.slice(t.length))) {
+      // 关键词取自原文，避免把 tag 里的「色」也改成「涩」
+      return { hit: true, tags: cleaned.slice(t.length).trim() };
     }
   }
   return { hit: false, tags: "" };
