@@ -74,7 +74,7 @@ export async function loadConfig(env: Env): Promise<AppConfig> {
     listSources(env),
     getSetting(env, "telegram", { enabled: true, chatIds: [] as string[], apiBase: "https://api.telegram.org" }),
     getSetting(env, "napcat", { enabled: false, groupIds: [] as string[] }),
-    getSetting(env, "qqbot", { enabled: false, targets: [] as string[] }),
+    getSetting(env, "qqbot", { enabled: false, targets: [] as string[], groupActivePush: true }),
     getSetting(env, "global", { perRunTotalCap: 10, seenTtlDays: 30 }),
   ]);
   return { sources, telegram, napcat, qqbot, perRunTotalCap: global.perRunTotalCap, seenTtlDays: global.seenTtlDays };

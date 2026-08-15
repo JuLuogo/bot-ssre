@@ -77,7 +77,10 @@ export interface AppConfig {
   sources: SourceConfig[];
   telegram: { enabled: boolean; chatIds: string[]; apiBase?: string };
   napcat: { enabled: boolean; groupIds: string[] }; // 个人 QQ（NapCat 中转）
-  qqbot: { enabled: boolean; targets: string[] }; // QQ 官方机器人，target 形如 group:<openid> / user:<openid>
+  // QQ 官方机器人，target 形如 group:<openid> / user:<openid>
+  // groupActivePush：是否向「群」做主动推送（定时/手动）。QQ 官方主动消息需单独申请权限，
+  // 未获权限时会返回 40034105；关掉它就只在群里响应关键词触发（被动回复），不再产生无用失败。
+  qqbot: { enabled: boolean; targets: string[]; groupActivePush?: boolean };
   perRunTotalCap: number; // 单次运行跨所有源的推送总上限，防刷屏
   seenTtlDays: number; // 去重标记保留天数
 }

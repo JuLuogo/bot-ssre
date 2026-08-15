@@ -74,23 +74,32 @@ async function getPassiveMsgId(env: Env, target: string): Promise<string | undef
 
 /**
  * 给 QQ 返回体补一句中文提示，便于后台「运行历史」直接看懂失败原因。
- * 按返回体里的英文 message 关键字做匹配（官方错误码表随版本变动，这里不硬编码码值），
- * 原始返回始终保留在后面。
+ * 优先用实测确认过的 code，其余按返回 message 关键字兜底（官方码表随版本变动，不整表硬编码）。
  */
 export function explainQQError(txt: string): string {
+  // 实测确认：群/单聊主动消息未获权限时返回该码
+  if (/40034105/.test(txt)) {
+    return `主动消息无权限（40034105）：该机器人未获得主动推送权限，只能在收到用户消息后 5 分钟内被动回复。` +
+      `解决：① QQ 开放平台开通/申请主动消息权限；② 或让群内先有人发言，走被动回复窗口｜原始: ${txt}`;
+  }
   const lower = txt.toLowerCase();
   const rules: Array<[RegExp, string]> = [
-    [/waiting for audit|audit/, "主动消息待审核/未报备：群主动推送需在 QQ 开放平台申请主动消息额度，否则只能被动回复"],
-    [/freq|frequency|limit|exceed|quota/, "触发频次/额度限制：QQ 对主动消息按月限额，被动回复不占额度"],
-    [/duplicate|repeat/, "被判定为重复消息：同一 msg_id 多次回复需要不同的 msg_seq"],
-    [/download|url|media|file/, "富媒体处理失败：QQ 服务器可能无法下载该图片（域名不可达 / 非直链 / 格式不支持）"],
-    [/permission|denied|forbidden|not allow/, "权限不足：确认机器人已在该群/该用户会话中，且具备对应消息权限"],
-    [/token|auth/, "鉴权失败：检查 QQ_BOT_APPID / QQ_BOT_SECRET"],
+    [/无权限|not allow|permission|denied|forbidden/, "权限不足：确认机器人在该会话有对应消息权限（主动消息需单独申请）"],
+    [/审核|waiting for audit|audit/, "主动消息待审核/未报备"],
+    [/频率|频次|超限|freq|frequency|limit|exceed|quota/, "触发频次/额度限制：主动消息按额度计费，被动回复不占额度"],
+    [/重复|duplicate|repeat/, "被判定为重复消息：同一 msg_id 多次回复需要不同的 msg_seq"],
+    [/下载|download|media|file/, "富媒体处理失败：QQ 服务器可能无法下载该图片（域名不可达 / 非直链 / 格式不支持）"],
+    [/token|鉴权|auth/, "鉴权失败：检查 QQ_BOT_APPID / QQ_BOT_SECRET"],
   ];
   for (const [re, hint] of rules) {
-    if (re.test(lower)) return `${hint}｜原始: ${txt}`;
+    if (re.test(lower) || re.test(txt)) return `${hint}｜原始: ${txt}`;
   }
   return txt;
+}
+
+/** 是否属于「主动消息不被允许」——用于在推送结果里给出可操作提示。 */
+export function isActiveMsgDenied(msg: string): boolean {
+  return /40034105/.test(msg) || /主动消息.*(无权限|失败)/.test(msg);
 }
 
 /** 富媒体 URL 上传，换取 file_info（file_type=1 为图片） */
@@ -145,24 +154,18 @@ function caption(i: Illust): string {
 export const qqbot: ChannelAdapter = {
   name: "qqbot",
   async push(env: Env, illust: Illust, target: string): Promise<void> {
-    // 优先蹭 5 分钟内的被动回复窗口（不占主动消息额度）；失败再按主动消息发一次
+    // 优先蹭 5 分钟内的被动回复窗口（不占主动消息额度，也不需要主动消息权限）
     const passive = await getPassiveMsgId(env, target);
-    if (!passive) {
-      await sendImage(env, target, illust);
-      return;
-    }
-    try {
-      // 同一 msg_id 多次回复必须给不同 msg_seq，否则被 QQ 去重
-      await sendImage(env, target, illust, passive, 1 + Math.floor(Math.random() * 100000));
-    } catch (e) {
-      const detail = e instanceof Error ? e.message : String(e);
+    if (passive) {
       try {
-        await sendImage(env, target, illust);
-      } catch (e2) {
-        const d2 = e2 instanceof Error ? e2.message : String(e2);
-        throw new Error(`被动回复失败(${detail})；主动消息也失败(${d2})`);
+        // 同一 msg_id 多次回复必须给不同 msg_seq，否则被 QQ 去重
+        await sendImage(env, target, illust, passive, 1 + Math.floor(Math.random() * 100000));
+        return;
+      } catch {
+        // 窗口可能已过期或回复次数用尽，继续尝试主动消息
       }
     }
+    await sendImage(env, target, illust);
   },
 };
 

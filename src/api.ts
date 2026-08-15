@@ -249,7 +249,7 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
         sources: [],
         telegram: b.telegram,
         napcat: b.napcat,
-        qqbot: b.qqbot ?? { enabled: false, targets: [] },
+        qqbot: b.qqbot ?? { enabled: false, targets: [], groupActivePush: true },
         perRunTotalCap: b.perRunTotalCap ?? 10,
         seenTtlDays: b.seenTtlDays ?? 30,
       });

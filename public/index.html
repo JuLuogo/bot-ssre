@@ -193,8 +193,13 @@
       <div class="form-grid">
         <label class="chk"><input type="checkbox" id="c_qqbot_enabled" /> 启用</label>
         <label class="f">目标（group:openid / user:openid，可为空靠订阅）<input type="text" id="c_qqbot_targets" placeholder="group:ABC123, user:XYZ789" /></label>
+        <label class="chk"><input type="checkbox" id="c_qqbot_grouppush" /> 向 QQ 群主动推送（定时/手动）</label>
       </div>
-      <div class="muted" style="margin-top:6px">主动消息有频控：认证机器人群聊约 60 条/分钟、每群每天 1000 条，建议单次上限设小。</div>
+      <div class="muted" style="margin-top:6px">
+        主动消息需在 QQ 开放平台单独申请权限，未获权限时群推送会返回 <code>40034105 主动消息失败, 无权限</code>。
+        <b>开不了就取消勾选「向 QQ 群主动推送」</b>：群里改为只响应关键词触发（被动回复，不需要该权限、也不占额度），私聊不受影响。
+        另外主动消息本身有频控（认证机器人群聊约 60 条/分钟、每群每天 1000 条），单次上限建议设小。
+      </div>
     </div>
 
     <div class="subgroup">
@@ -303,6 +308,7 @@ async function loadStatus() {
   $("c_tg_api").value = c.telegram.apiBase || "";
   $("c_qqbot_enabled").checked = !!(c.qqbot && c.qqbot.enabled);
   $("c_qqbot_targets").value = ((c.qqbot && c.qqbot.targets) || []).join(", ");
+  $("c_qqbot_grouppush").checked = !(c.qqbot && c.qqbot.groupActivePush === false);
   $("c_qq_enabled").checked = !!c.napcat.enabled;
   $("c_qq_groups").value = (c.napcat.groupIds || []).join(", ");
   $("c_cap").value = c.perRunTotalCap ?? 10;
@@ -478,7 +484,7 @@ async function saveConfig() {
   const d = await api("/api/config", "POST", {
     telegram: { enabled: $("c_tg_enabled").checked, chatIds: parseList($("c_tg_chats").value), apiBase: $("c_tg_api").value.trim() || "https://api.telegram.org" },
     napcat: { enabled: $("c_qq_enabled").checked, groupIds: parseList($("c_qq_groups").value) },
-    qqbot: { enabled: $("c_qqbot_enabled").checked, targets: parseList($("c_qqbot_targets").value) },
+    qqbot: { enabled: $("c_qqbot_enabled").checked, targets: parseList($("c_qqbot_targets").value), groupActivePush: $("c_qqbot_grouppush").checked },
     perRunTotalCap: Number($("c_cap").value) || 10,
     seenTtlDays: Number($("c_ttl").value) || 30,
   });

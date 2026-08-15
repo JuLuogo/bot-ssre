@@ -8,7 +8,7 @@ import { isSeen, markSeen } from "./store";
 import { recordPush, recordRun, listSubscriberChatIds } from "./db";
 import { telegram } from "./channels/telegram";
 import { napcat } from "./channels/napcat";
-import { qqbot } from "./channels/qqbot";
+import { qqbot, isActiveMsgDenied } from "./channels/qqbot";
 import { fetchRandomIllusts } from "./ondemand";
 import { diag } from "./diag";
 
@@ -33,7 +33,12 @@ export async function assembleChannels(env: Env, cfg: AppConfig): Promise<Channe
   }
   if (cfg.qqbot.enabled) {
     const subs = await listSubscriberChatIds(env, "qqbot");
-    const qqTargets = [...new Set([...cfg.qqbot.targets, ...subs])];
+    let qqTargets = [...new Set([...cfg.qqbot.targets, ...subs])];
+    // QQ 官方主动消息需单独申请权限（无权限时报 40034105）。关掉「群主动推送」后，
+    // 群只保留关键词触发（被动回复），不再对群发起注定失败的主动消息。
+    if (cfg.qqbot.groupActivePush === false) {
+      qqTargets = qqTargets.filter((t) => !t.startsWith("group:"));
+    }
     if (qqTargets.length > 0) channels.push({ adapter: qqbot, targets: qqTargets, opts: {} });
   }
   return channels;
@@ -53,6 +58,21 @@ async function pushIllustToChannels(env: Env, it: Illust, channels: ChannelSpec[
     }
   }
   return okChannels;
+}
+
+/** 诊断说明：本次实际尝试的目标 + 针对已知失败的可操作提示。 */
+function buildNotes(cfg: AppConfig, channels: ChannelSpec[], errors: string[]): string[] {
+  const notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
+  if (cfg.qqbot.enabled && cfg.qqbot.groupActivePush === false) {
+    notes.push("QQ群主动推送已关闭：群里只响应关键词触发（被动回复），定时/手动推送不发群。");
+  }
+  if (errors.some(isActiveMsgDenied)) {
+    notes.push(
+      "QQ 返回「主动消息无权限(40034105)」：需在 QQ 开放平台为该机器人申请主动消息权限；" +
+        "若暂时开不了，可在下方渠道配置里关掉「向 QQ 群主动推送」，群里改用关键词触发。",
+    );
+  }
+  return notes;
 }
 
 export async function runOnce(env: Env): Promise<RunSummary> {
@@ -102,7 +122,6 @@ export async function runOnce(env: Env): Promise<RunSummary> {
     summary.errors.push("没有可用的推送目标（检查渠道开关、token 与目标 id）");
   }
   summary.notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
-
   // 4) 逐图推送，成功任一渠道即标记已推送并写记录
   for (const it of picked) {
     const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
@@ -123,6 +142,7 @@ export async function runOnce(env: Env): Promise<RunSummary> {
     }
   }
 
+  summary.notes = buildNotes(cfg, channels, summary.errors);
   summary.finishedAt = Date.now();
   await recordRun(env, summary);
   await diag(
@@ -157,8 +177,6 @@ export async function pushRandomBatch(env: Env, count: number): Promise<RunSumma
 
   const channels = await assembleChannels(env, cfg);
   if (channels.length === 0) summary.errors.push("没有可用的推送目标（检查渠道开关、token 与目标 id）");
-  // 诊断：把本次真正尝试的目标写出来，便于判断"群里收不到"是发送失败还是根本没在目标里
-  summary.notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
 
   for (const it of illusts) {
     const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
@@ -178,6 +196,7 @@ export async function pushRandomBatch(env: Env, count: number): Promise<RunSumma
     }
   }
 
+  summary.notes = buildNotes(cfg, channels, summary.errors);
   summary.finishedAt = Date.now();
   await recordRun(env, summary);
   await diag(
