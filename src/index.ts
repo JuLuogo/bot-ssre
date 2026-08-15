@@ -8,6 +8,7 @@ import { handleOneBotWebhook } from "./onebot_webhook";
 import { alreadyExecuted } from "./store";
 import { resolveEnv } from "./creds";
 import { isAuthed, loginResponse } from "./auth";
+import { serveImage, pruneOld } from "./relay";
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -24,6 +25,11 @@ export default {
     if (url.pathname === "/onebot/webhook" && request.method === "POST") {
       return handleOneBotWebhook(request, env, ctx);
     }
+    // 图片中转（公开）：QQ / 后台画廊按 /img/<key> 拉 R2 里的图。
+    // key 是 128bit 随机不可枚举，只吐图片字节，不涉任何后台数据——放在登录门禁之前。
+    if (url.pathname.startsWith("/img/") && request.method === "GET") {
+      return serveImage(env, url.pathname.slice("/img/".length));
+    }
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
     // 后台页面门禁：未登录一律显示登录页，鉴权后才下发管理 SPA
     if (!(await isAuthed(request, env))) return loginResponse();
@@ -38,5 +44,8 @@ export default {
     }
     const summary = await runOnce(await resolveEnv(env));
     console.log("[scheduled]", JSON.stringify(summary));
+    // 顺带清理过期的中转图（保留期见 relay.RELAY_RETENTION_DAYS）
+    const pruned = await pruneOld(env);
+    if (pruned) console.log(`[scheduled] 清理中转图 ${pruned} 张`);
   },
 } satisfies ExportedHandler<Env>;

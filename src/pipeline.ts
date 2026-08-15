@@ -11,8 +11,22 @@ import { napcat } from "./channels/napcat";
 import { qqbot, isActiveMsgDenied } from "./channels/qqbot";
 import { fetchRandomIllusts } from "./ondemand";
 import { diag } from "./diag";
+import { stageImage } from "./relay";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * 若图片来自 QQ 拉不动的慢反代（host == PIXIV_PROXY_HOST），先经 Worker 下载存 R2，
+ * 把 imageUrl 换成秒回静态的 {PUBLIC_BASE_URL}/img/<key>，供所有渠道与画廊记录使用。
+ * 其它源（随机图/booru，QQ 能直接拉到）原样返回，不占中转开销。
+ */
+async function relayIfNeeded(env: Env, it: Illust): Promise<Illust> {
+  const host = (env.PIXIV_PROXY_HOST || "").trim();
+  const base = (env.PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+  if (!host || !base || !it.imageUrl.includes(host)) return it;
+  const key = await stageImage(env, it.imageUrl);
+  return key ? { ...it, imageUrl: `${base}/img/${key}` } : it;
+}
 
 interface ChannelSpec {
   adapter: ChannelAdapter;
@@ -129,7 +143,8 @@ export async function runOnce(env: Env): Promise<RunSummary> {
   }
   summary.notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
   // 4) 逐图推送，成功任一渠道即标记已推送并写记录
-  for (const it of picked) {
+  for (const raw of picked) {
+    const it = await relayIfNeeded(env, raw);
     const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
     if (okChannels.length > 0) {
       await markSeen(env, it.source, it.id, cfg.seenTtlDays);

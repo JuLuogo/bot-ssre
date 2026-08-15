@@ -4,10 +4,12 @@ export interface Env {
   KV: KVNamespace;
   DB: D1Database;
   ASSETS: Fetcher;
+  R2: R2Bucket; // 图片中转桶（QQ 拉不动慢反代时，Worker 下载后经 /img/<key> 转发）
   ENVIRONMENT: string;
   PIXIV_PROXY_HOST: string;
   // 以下为 secret（wrangler secret put）/ 可后台配的凭证，本地可用 .dev.vars
   PIXIV_API_BASE?: string; // Pixiv 榜单 API 反代 base（绕开 Cloudflare IP 被 Pixiv 封）；留空直连 www.pixiv.net
+  PUBLIC_BASE_URL?: string; // bot 对外可达的基址（如 https://bot-ces.060730.xyz），用于拼中转图地址；须是 QQ 能访问到的域名
   TG_BOT_TOKEN?: string;
   NAPCAT_BASE_URL?: string;
   NAPCAT_TOKEN?: string;

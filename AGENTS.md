@@ -32,7 +32,7 @@ Workers Builds 从 GitHub 拉代码构建；**只在本地改、不 push，线�
 - 后台页 + **所有 `/api`（读和写）** 都要经 `src/auth.ts` 的 `isAuthed`（用 `ADMIN_TOKEN` 登录，cookie 会话）。
 - **fail-closed**：未设 `ADMIN_TOKEN` 时后台完全锁死。不要为了方便改成免鉴权。
 - `assets.run_worker_first` 必须为 `true`，否则静态页会绕过 Worker 门禁。
-- **不要新增公开（免鉴权）的 `/api` 端点**。例外：webhook `/tg/webhook`、`/qq/webhook`、`/onebot/webhook` 各自验签，保持公开。
+- **不要新增公开（免鉴权）的 `/api` 端点**。例外：webhook `/tg/webhook`、`/qq/webhook`、`/onebot/webhook` 各自验签，保持公开；`GET /img/<key>` 图片中转出口保持公开（key 为 128bit 随机不可枚举、只吐图片字节、不涉后台数据，QQ 与画廊都靠它取图）。
 
 ### 6. 按需图内容保持全年龄
 OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllAges` 过滤），**不接 explicit/NSFW 分级**。
@@ -91,6 +91,26 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 2. **线上验证随机源**：后台「数据源」应有 18 行 `randomapi`（没有就点「一键补全全部随机图 API 源」）；
    多次触发返图后在「🩺 触发诊断」里看 `来源=` 是否在不同源之间轮换，以确认多源随机 + 故障切换生效。
 3. 可选：若希望每日定时推送也混入随机图，需要新增开关（当前按第 8 条约定刻意排除）。
+
+## 已完成：pixiv 图经 R2 中转发 QQ（2026-08-15）
+
+QQ 国内服务器拉不动慢反代（pixiv 回源冷启动 10s+ → `40093007 富媒体文件下载失败`），而随机图（含
+自有 `pic.060730.xyz` 静态图）秒回、QQ 能拉到。QQ 接口只收 URL、不收字节（已查官方 botpy SDK 证实）。
+
+- 新增 R2 桶 `bot-ssre-relay`（`wrangler.jsonc` 靠自动开通；换账号首次部署若未自动建，
+  用 `npx wrangler r2 bucket create bot-ssre-relay`）。
+- `src/relay.ts`：`stageImage` 下载图片存 R2 → `serveImage` 经**公开路由 `GET /img/<key>`** 秒回 →
+  `pruneOld` 每日 cron 清理超 `RELAY_RETENTION_DAYS`(30) 天的对象。key 为 128bit 随机不可枚举。
+- `pipeline.relayIfNeeded`：仅当图片 host == `PIXIV_PROXY_HOST` 且配了 `PUBLIC_BASE_URL` 时中转，
+  把 `imageUrl` 换成 `{PUBLIC_BASE_URL}/img/<key>`，供所有渠道**和画廊记录**共用（画廊回看不再失效）。
+  随机图/booru（QQ 能直接拉）不中转，不占 R2。
+- 新增可后台配的凭证 `PUBLIC_BASE_URL`（如 `https://bot-ces.060730.xyz`，须是 QQ 能访问到的域名）。
+- **为什么不用第三方免费图床**：QQ 拉图的硬约束是「国内可达 + 快」。ImgBB/SM.MS 等境外免费床国内不稳、
+  且有存活期/内容条款风险；国内床（七牛/又拍）要实名+备案域名。而用户自己的 `bot-ces.060730.xyz`
+  已验证对 QQ 可达（同 `pic.060730.xyz`），R2 免费 10GB + 出站免费，自有可控，是更优解。
+
+**待线上验证**：设 `PUBLIC_BASE_URL` 后触发/推送 pixiv 图，QQ 应能收到；后台画廊能预览 `/img/<key>`。
+
 
 ## 关键事实（勿再踩坑 / 勿再猜）
 

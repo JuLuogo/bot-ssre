@@ -16,6 +16,7 @@ export const CREDENTIAL_KEYS = [
   "QQ_BOT_SECRET",
   "PIXIV_PROXY_HOST",
   "PIXIV_API_BASE",
+  "PUBLIC_BASE_URL",
 ] as const;
 
 export type CredentialKey = (typeof CREDENTIAL_KEYS)[number];

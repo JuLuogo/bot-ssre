@@ -26,6 +26,15 @@
       "migrations_dir": "migrations"
     }
   ],
+  // 图片中转桶：QQ 拉不动慢反代(如 pixiv 回源)时，Worker 先把图下载存到这里，
+  // 再把 bot 自己的 /img/<key> 静态地址发给 QQ。发完即删，常驻存储≈0。
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "bot-ssre-relay"
+      // 不填额外 id：靠 automatic resource provisioning 在部署时自动创建/关联。
+    }
+  ],
   // 网页 demo 静态资源
   // 网页 demo 静态资源。run_worker_first: true —— 所有请求先经 Worker（做登录门禁），鉴权后再交给 ASSETS。
   "assets": {
