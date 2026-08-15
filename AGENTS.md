@@ -81,14 +81,22 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 - 自有图库已确认 **100% 全年龄**，适配器标 `rating: "safe"`，无需再过滤。
 
 ## 待办（下次开工按序执行）
-1. `npx tsc --noEmit` + `npx wrangler deploy --dry-run` 做最终校验。
-2. 提交文档收尾改动，然后 `git push origin main`（会同时推送 ahead 的 `26744d9`）。
-3. 等 Workers Builds 构建；若 builds MCP 不在线，用 Git 状态/Cloudflare 面板确认。
-4. 远程 D1 迁移：Deploy command 为「先部署再迁移」，`0005` 会自动应用（幂等，安全）。
-5. 部署后线上验证：后台出现「自有随机图库」；点「推送随机新图」/ 私聊发触发词，应收到 `pic.060730.xyz` 图片。
-6. 可选：审核 `docs/RANDOM_IMAGE_APIS.md` 后，再决定添加哪个第三方备用源；默认不会自动启用。
+1. 线上验证 randompic + randomapi（见下）。
+2. 部署后线上验证：后台「数据源」新增一行选 `randomapi` → 下拉选一个源（如 `pic-re`/`alcy-moe`）启用 → 点「推送随机新图」/ 私聊发触发词，应收到该源的图片。
+3. randompic：后台出现「自有随机图库」；无关键词返图应来自 `pic.060730.xyz`。
+4. 逐个启用第三方源观察错误/耗时；被 IP 风控的源（nekos.best/waifu.im/lolicon）会自动故障切换。
 
-## 环境/账号备注（2026-08-14）
+## 已完成：第三方随机图 API 注册表（randomapi）— commit `8519d1f` 已推送
+
+- `src/sources/randomapi_providers.ts`：审核通过的源固定注册表（json/redirect/direct 三协议 + needsKey 锁定项）；后台只能选 slug，不能填任意 URL（防 SSRF）。
+- `src/sources/randomapi.ts`：按协议取稳定图片 URL，https+域名白名单/扩展名校验、去重、单源上限 6、超时 12s。
+- `ondemand.fetchRandomIllusts`：无关键词聚合 randompic+randomapi 随机顺序故障切换；带关键词走 booru。
+- `api`：`GET /api/providers`；`/api/sources` 校验 randomapi slug、需密钥拒启用。
+- 后台数据源表单加 randomapi 选项 + provider 下拉。
+- 用户审核结论：`docs/RANDOM_IMAGE_APIS.md` 第 6 节全部不接，其余接入。
+- 本地实测：redirect(alcy)/direct(pic.re)/json(nekosia,nekos-life) 均返回合法去重 URL；needsKey/未知 slug 返回空；非 200 源自动回退（nekos.best/lolicon 从本机 IP 被 403，属预期）。
+
+## 环境/账号备注（2026-08-15）
 - Worker：`bot-ssre`；后台 `https://bot-ssre.juluogogo.workers.dev`（或 `https://bot-ces.060730.xyz`）。
-- 本会话 `cloudflare-builds` / `cloudflare-observability` MCP 当前断开；`cloudflare-bindings` 仍可用。
-- 当前分支 `main` 比 `origin/main` ahead 1（`26744d9`），另有文档/AGENTS 未提交改动。
+- `randompic`(commit `26744d9`) 与 `randomapi`(commit `8519d1f`) 均已推送 origin/main。
+- 本会话 `cloudflare-builds` / `cloudflare-observability` MCP 断开；`cloudflare-bindings` 可用。工作区 `.claude/` 未跟踪（计划/临时目录，勿提交）。
