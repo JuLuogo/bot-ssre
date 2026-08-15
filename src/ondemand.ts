@@ -85,25 +85,32 @@ function dedupeShuffle(pool: Illust[], want: number): Illust[] {
 
 /**
  * 抓取 N 张全年龄插画（随机、去重、打乱）。
- * 无关键词时优先用静态随机图源（如用户自建 pic 站，原生随机、内容自证安全）；
- * 有关键词或无随机图源时走 booru（支持按 tag 检索），并经 isAllAges 只留 rating:safe。
+ * 无关键词时优先随机图源（自有 pic 站 + 已启用的第三方随机图 API），随机顺序、逐个故障切换；
+ * 有关键词或随机源都失败时走 booru（支持按 tag 检索），并经 isAllAges 只留 rating:safe。
  */
 export async function fetchRandomIllusts(env: Env, tags: string, count: number): Promise<Illust[]> {
   const cfg = await getConfig(env);
   const want = Math.max(1, count);
 
-  // 1) 无关键词：优先静态随机图源
+  // 1) 无关键词：随机图源（randompic + randomapi）随机顺序尝试，失败自动切换
   if (!tags.trim()) {
-    const rp = cfg.sources.find((s) => s.enabled && s.adapter === "randompic");
-    if (rp) {
-      const adapter = getSourceAdapter("randompic");
+    const randomSources = cfg.sources.filter(
+      (s) => s.enabled && (s.adapter === "randompic" || s.adapter === "randomapi"),
+    );
+    const pool: Illust[] = [];
+    for (const s of randomSources.sort(() => Math.random() - 0.5)) {
+      const adapter = getSourceAdapter(s.adapter);
+      if (!adapter) continue;
       try {
-        const items = (await adapter?.fetchRanking(env, { limit: want, site: rp.site, mode: rp.mode, label: rp.label })) ?? [];
-        if (items.length > 0) return dedupeShuffle(items, want);
+        const items =
+          (await adapter.fetchRanking(env, { limit: want, site: s.site, mode: s.mode, label: s.label })) ?? [];
+        pool.push(...items);
       } catch {
-        // 回退 booru
+        // 故障切换到下一个随机源
       }
+      if (pool.length >= want) break;
     }
+    if (pool.length > 0) return dedupeShuffle(pool, want);
   }
 
   // 2) booru 随机（支持 tag）

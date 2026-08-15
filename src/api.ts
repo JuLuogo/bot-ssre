@@ -16,6 +16,7 @@ import { listCredentialStatus, setCredential, deleteCredential, resolveEnv } fro
 import { getAccessToken } from "./channels/qqbot";
 import { isAuthed, checkPassword, buildSessionCookie, buildClearCookie } from "./auth";
 import { getOnDemandConfig, setOnDemandConfig, type OnDemandConfig } from "./ondemand";
+import { listProviderMeta, getProvider } from "./sources/randomapi_providers";
 
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
@@ -191,11 +192,22 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
     }
   }
 
+  // 第三方随机图 API 注册表（后台下拉用；只读）
+  if (pathname === "/api/providers" && method === "GET") {
+    return json({ ok: true, items: listProviderMeta() });
+  }
+
   if (pathname === "/api/sources") {
     if (method === "GET") return json({ ok: true, items: await listSources(env) });
     if (method === "POST") {
       const b = (await request.json().catch(() => null)) as Partial<SourceConfig> | null;
       if (!b || !b.adapter || !b.label) return json({ ok: false, error: "invalid source（需 adapter 和 label）" }, 400);
+      // 第三方随机图 API：site 必须是注册表中的 provider slug，且需密钥的不可启用（防任意 URL / SSRF）
+      if (b.adapter === "randomapi") {
+        const p = getProvider((b.site || "").trim());
+        if (!p) return json({ ok: false, error: "未知的随机图 API provider（只能选注册表中的源）" }, 400);
+        if (p.needsKey && (b.enabled ?? true)) return json({ ok: false, error: `${p.name} 需要密钥，暂不可启用` }, 400);
+      }
       const saved = await upsertSource(env, {
         id: b.id,
         adapter: b.adapter,

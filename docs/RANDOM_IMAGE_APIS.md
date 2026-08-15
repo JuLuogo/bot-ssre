@@ -6,6 +6,17 @@
 
 > 本机可用不代表 Cloudflare Worker 出口一定可用。正式接入前仍需线上实测。
 
+## 0. 接入状态（代码注册表 `src/sources/randomapi_providers.ts`）
+
+用户审核结论：第 6 节（失效/不建议）**全部不接入**；其余通过。已按各源协议写入固定注册表，后台「数据源」里选 `randomapi` → 下拉选择即可开关，**不能填任意 URL**（防 SSRF）。多个启用源随机选择 + 失败自动切换。
+
+- **已接入·可直接启用**：`lolicon`(支持关键词)、`nekos-best`、`nekosia`、`nekos-life`、`purrbot`、`waifu-im`、`nekos-dev`、`alcy-moe`、`alcy-mp`、`alcy-ycy`、`paugram`、`loliapi-acg`、`jitsu`、`nekosapi-file`、`pic-re`、`dmoe`。
+- **已登记·需密钥（后台展示但不可启用）**：`unsplash`、`waifu-it`（缺凭证入口）。
+- **自有图库**：`randompic`（见第 1 节，默认优先）。
+- **不接入**：见第 6 节。
+
+> 说明：每个源按其协议适配——`json`(取图片 URL)/`redirect`(读 302 Location)/`direct`(端点即随机图，加随机参数)。所有最终图片 URL 强制 https + 域名白名单或图片扩展名校验。部分源（nekos.best、waifu.im、lolicon 等）对数据中心 IP 有 403 风控，线上失败会自动切到下一个启用源。
+
 ## 1. 当前首选：自有静态随机图库
 
 | 项目 | 结果 |

@@ -143,7 +143,10 @@
           <option value="pixiv">pixiv 排行榜</option>
           <option value="rss">rss / RSSHub</option>
           <option value="randompic">randompic（静态随机图站）</option>
+          <option value="randomapi">randomapi（第三方随机图 API）</option>
         </select></label>
+      <label class="f" id="f_provider_wrap" style="display:none">随机图 API
+        <select id="f_provider"></select></label>
       <label class="f">名称 label<input type="text" id="f_label" placeholder="如 推特-画师X" /></label>
       <label class="f">site / URL<input type="text" id="f_site" placeholder="booru base 或 RSSHub 完整 URL" /></label>
       <label class="f">tags（booru）<input type="text" id="f_tags" placeholder="sort:score:desc" /></label>
@@ -328,8 +331,21 @@ const ADAPTER_HINT = {
   pixiv: "site / tags 不填；mode 填 daily / weekly / monthly（勿用 _r18）；需先配置 PIXIV_PROXY_HOST 才生效。",
   rss: "site 填 RSSHub 路由完整 URL（如 https://你的域名/twitter/user/xxx）；tags / mode 不填；建议保持「可信」勾选。",
   randompic: "site 填静态随机图站（默认 https://pic.060730.xyz）；mode 可填 v（竖图）、h（横图）、j 或逗号组合，留空用全部。机器人读取 random.js 的实时数量，但图片始终从 site 域名取，并自动跳过不可达类型。",
+  randomapi: "从下拉选择已审核的第三方随机图 API（不能填任意 URL）；tags 仅对支持关键词的源（如 Lolicon）生效；标「需密钥」的源暂不可启用。",
 };
-function updateSrcHint() { $("srcHint").textContent = ADAPTER_HINT[$("f_adapter").value] || ""; }
+let PROVIDERS = [];
+async function loadProviders() {
+  const d = await api("/api/providers");
+  PROVIDERS = d.items || [];
+  $("f_provider").innerHTML = PROVIDERS
+    .map((p) => `<option value="${esc(p.slug)}">${esc(p.name)}${p.needsKey ? "（需密钥）" : ""}${p.supportsTags ? " · 支持关键词" : ""}</option>`)
+    .join("");
+}
+function updateSrcHint() {
+  const a = $("f_adapter").value;
+  $("srcHint").textContent = ADAPTER_HINT[a] || "";
+  $("f_provider_wrap").style.display = a === "randomapi" ? "" : "none";
+}
 
 async function loadSources() {
   const d = await api("/api/sources");
@@ -354,6 +370,7 @@ function editSource(id) {
   $("f_id").value = s.id; $("f_adapter").value = s.adapter; $("f_label").value = s.label || "";
   $("f_site").value = s.site || ""; $("f_tags").value = s.tags || ""; $("f_mode").value = s.mode || "";
   $("f_limit").value = s.limit || 5; $("f_trusted").checked = !!s.trusted; $("f_enabled").checked = !!s.enabled;
+  if (s.adapter === "randomapi" && s.site) $("f_provider").value = s.site;
   $("srcFormTitle").textContent = "编辑数据源 #" + s.id;
   updateSrcHint();
 }
@@ -361,10 +378,12 @@ function resetForm() {
   $("f_id").value = ""; $("f_label").value = ""; $("f_site").value = ""; $("f_tags").value = ""; $("f_mode").value = "";
   $("f_limit").value = 5; $("f_trusted").checked = false; $("f_enabled").checked = true;
   $("srcFormTitle").textContent = "新增数据源";
+  updateSrcHint();
 }
 async function saveSource() {
+  const adapter = $("f_adapter").value;
   const body = {
-    adapter: $("f_adapter").value,
+    adapter,
     label: $("f_label").value.trim(),
     site: $("f_site").value.trim() || undefined,
     tags: $("f_tags").value.trim() || undefined,
@@ -373,6 +392,13 @@ async function saveSource() {
     trusted: $("f_trusted").checked,
     enabled: $("f_enabled").checked,
   };
+  if (adapter === "randomapi") {
+    const p = PROVIDERS.find((x) => x.slug === $("f_provider").value);
+    if (!p) { toast("请选择一个随机图 API", true); return; }
+    body.site = p.slug; body.tags = undefined; body.mode = undefined;
+    body.trusted = true; // 注册表源已保证全年龄
+    if (!body.label) body.label = p.name;
+  }
   if ($("f_id").value) body.id = Number($("f_id").value);
   if (!body.label) { toast("请填写名称", true); return; }
   const d = await api("/api/sources", "POST", body);
@@ -494,7 +520,7 @@ async function saveOndemand() {
   if (d.ok) toast("触发设置已保存");
 }
 async function refreshAll() {
-  await loadStatus(); await loadCreds(); await loadSources();
+  await loadStatus(); await loadCreds(); await loadProviders(); await loadSources();
   await loadSubscribers(); await loadRuns(); await loadGallery(); await loadOndemand();
 }
 async function runRandom() {

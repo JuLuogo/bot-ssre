@@ -61,7 +61,7 @@ export interface ChannelAdapter {
 /** 单个数据源的运行配置 */
 export interface SourceConfig {
   id?: number; // D1 主键（新增时无）
-  adapter: "gelbooru" | "moebooru" | "pixiv" | "rss" | "randompic";
+  adapter: "gelbooru" | "moebooru" | "pixiv" | "rss" | "randompic" | "randomapi";
   enabled: boolean;
   label: string; // 展示名
   site?: string; // booru base / RSSHub URL / randompic 站点根地址
