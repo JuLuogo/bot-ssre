@@ -13,24 +13,30 @@ npx tsc --noEmit                                    # 类型检查
 ## 目录职责
 ```
 src/
-  index.ts           入口：fetch 路由（webhook → /api → 静态资源）+ scheduled
-  pipeline.ts        编排：拉取 → 过滤 → 去重 → 装配渠道 → 推送 → 记录
+  index.ts           入口：fetch 路由（webhook → /api → 静态资源）+ scheduled，并把 ctx 传给 webhook
+  pipeline.ts        编排：拉取 → 过滤 → 去重 → 装配渠道 → 推送 → 记录（榜单源；随机源被排除）
+  ondemand.ts        按需返图：触发词匹配、随机源聚合与故障切换、ondemand 配置读写
   types.ts           Illust / SourceAdapter / ChannelAdapter / AppConfig / Env
   http.ts            fetchJson + 统一 UA + 超时
   filter.ts          rating 归一化与全年龄判定
   store.ts           KV：去重标记、cron 幂等
+  diag.ts            KV 环形诊断日志（后台「🩺 触发诊断」）
+  auth.ts            后台登录门禁：ADMIN_TOKEN 口令 + HMAC cookie 会话，fail-closed
   db.ts              D1：settings / sources / pushed / runs / subscribers
   creds.ts           凭证层：D1 credentials 覆盖 env（白名单 + 掩码）
   config.ts          配置门面（委托 db.ts）
-  api.ts             /api/* 全部路由
-  telegram_bot.ts    Telegram webhook（订阅命令）
-  qqbot_webhook.ts   QQ 官方 webhook（op=13 + 事件）
+  api.ts             /api/* 全部路由（除 login/logout 外一律需鉴权）
+  telegram_bot.ts    Telegram webhook（触发词返图 + 订阅命令）
+  qqbot_webhook.ts   QQ 官方 webhook（op=13 + 事件 + 触发词返图）
+  onebot_webhook.ts  个人 QQ（NapCat）上报入口
   qqsign.ts          Ed25519 派生 / 签名 / 验签
-  sources/           数据源适配器 + 注册表
+  sources/           数据源适配器 + 注册表（含 randomapi_providers 固定注册表）
   channels/          推送渠道适配器
 public/index.html    管理后台（原生 JS 单页，无构建步骤）
 migrations/          D1 迁移，按序号执行
 ```
+
+三个 webhook 的共同结构：便宜的判断（验签、触发匹配）留在请求内 → **立刻回 200** → `ctx.waitUntil()` 里抓图并发送。原因见 [技术原理](ARCHITECTURE.md) 第 14 节，不要改回同步。
 
 ## 调试手法
 
@@ -129,28 +135,48 @@ export const yourchannel: ChannelAdapter = {
 npx wrangler d1 migrations create acg-db add_something   # 生成 migrations/000N_add_something.sql
 npx wrangler d1 migrations apply acg-db --local
 ```
-迁移只能追加、不可修改已应用的文件（wrangler 用 `d1_migrations` 表记录）。写 DDL 时用 `IF NOT EXISTS`，seed 数据用 `INSERT OR IGNORE`，保证重复执行安全。
+迁移只能追加、不可修改已应用的文件（wrangler 用 `d1_migrations` 表记录）。写 DDL 时用 `IF NOT EXISTS`，seed 数据用 `INSERT OR IGNORE` 或 `INSERT ... SELECT ... WHERE NOT EXISTS (...)`，保证重复执行安全。
+
+验幂等（不要污染主 `.wrangler` 状态）：
+```bash
+npx wrangler d1 migrations apply acg-db --local --persist-to .tmp-d1
+npx wrangler d1 execute acg-db --local --persist-to .tmp-d1 --file migrations/000N_x.sql   # 再跑两遍
+npx wrangler d1 execute acg-db --local --persist-to .tmp-d1 --command "SELECT COUNT(*) FROM sources"
+rm -rf .tmp-d1
+```
+
+`migrations/0006_randomapi_sources.sql` 是**由 `randomapi_providers.ts` 生成**的（18 条 provider seed）。改注册表后要同步这个文件；也可以让用户点后台「一键补全全部随机图 API 源」（`POST /api/sources/seed-providers`），它与迁移等效但不依赖迁移执行。
 
 ## 扩展：新增可后台配置的凭证
 在 `src/creds.ts` 的 `CREDENTIAL_KEYS` 里加键名即可——后台表格、掩码、来源标签、写入白名单全部自动生效。同时在 `types.ts` 的 `Env` 里声明该字段。
 **不要**把 `ADMIN_TOKEN` 加进去。
 
 ## API 契约
-所有响应都是 `{ ok: boolean, ... }`；失败时带 `error` 字段。写操作需 `Authorization: Bearer <ADMIN_TOKEN>`。
+所有响应都是 `{ ok: boolean, ... }`；失败时带 `error` 字段。
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|---|---|---|---|
-| GET | `/api/status` | — | 环境、完整配置、上次运行、各项 configured 标记、`origin` |
-| GET | `/api/recent` | — | 最近 60 条推送记录 |
-| GET | `/api/runs` | — | 最近 20 次运行 |
-| POST | `/api/run` | ✔ | 同步执行一次并返回 summary |
-| POST | `/api/test?target=` | ✔ | `telegram` / `qqbot` / `napcat` 连通性自检 |
-| GET/POST/DELETE | `/api/sources` | 读免/写✔ | 数据源 CRUD（POST 带 id 即更新） |
-| GET/POST | `/api/config` | 读免/写✔ | 渠道与全局设置（不含 sources） |
-| GET/DELETE | `/api/subscribers` | 读免/写✔ | 支持 `?platform=telegram\|qqbot\|all` |
-| GET/POST/DELETE | `/api/credentials` | 读免/写✔ | 只回掩码；POST `{name,value}`；DELETE `?name=` |
-| POST | `/tg/webhook` | 平台签名 | Telegram 更新 |
-| POST | `/qq/webhook` | 平台签名 | QQ 官方事件 / op=13 验证 |
+鉴权：**除 `/api/login`、`/api/logout` 与三个 webhook 外，所有 `/api/*`（读和写）都要过 `auth.isAuthed`**。
+先 `POST /api/login {password}`（口令 = `ADMIN_TOKEN`）拿 cookie 会话，后续带 cookie。未设 `ADMIN_TOKEN` 时后台整体锁死（登录返回 503）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/login` · `/api/logout` | 唯一免鉴权的两个 `/api`；登录下发 HMAC cookie |
+| GET | `/api/status` | 环境、完整配置、上次运行、各项 configured 标记、`origin` |
+| GET | `/api/recent` | 最近 60 条推送记录 |
+| GET | `/api/runs` | 最近 20 次运行 |
+| POST | `/api/run` | 同步跑一次榜单抓取并返回 summary（含 `notes` 诊断行） |
+| POST | `/api/push-random?count=` | 随机推送 1–20 张，不去重 |
+| GET/POST | `/api/ondemand` | 提示词返图配置：`{enabled,triggers,count,requireAtInGroup,allowPrivate}` |
+| POST | `/api/test?target=` | `telegram` / `qqbot` / `napcat` 连通性自检 |
+| GET/POST/DELETE | `/api/sources` | 数据源 CRUD（POST 带 id 即更新；`randomapi` 校验 slug、需密钥拒启用） |
+| POST | `/api/sources/seed-providers` | 幂等补全全部注册表 provider，返回 `{added, skipped}` |
+| GET | `/api/providers` | 注册表元数据（slug/name/docUrl/protocol/needsKey/note） |
+| GET/DELETE | `/api/diag` | 诊断日志读取 / 清空 |
+| GET/POST | `/api/config` | 渠道与全局设置（不含 sources；含 `qqbot.groupActivePush`） |
+| GET/DELETE | `/api/subscribers` | 支持 `?platform=telegram\|qqbot\|all` |
+| GET/POST/DELETE | `/api/credentials` | 只回掩码；POST `{name,value}`；DELETE `?name=` |
+| POST | `/tg/webhook` | 平台签名（secret token）；Telegram 更新 |
+| POST | `/qq/webhook` | 平台签名（Ed25519）；QQ 官方事件 / op=13 验证 |
+| POST | `/onebot/webhook` | 可选 HMAC-SHA1 验签；NapCat 上报 |
 
 ## 代码约定
 - 全部 TypeScript strict；提交前跑 `npx tsc --noEmit`。
@@ -161,9 +187,14 @@ npx wrangler d1 migrations apply acg-db --local
 - 后台页面不引入任何构建工具与外部依赖，保持单文件可直接部署。
 
 ## 踩过的坑
+- **webhook 里同步做重活会被平台超时掐断**：客户端断连会取消 Worker 请求上下文，发送中止且完全静默（"发了触发词没反应"）。三个 webhook 一律「立刻回 200 + `ctx.waitUntil()`」。
+- **后台任务失败必须回一句话告诉用户**：只 `console.warn` 会让故障看起来像"机器人没收到"，极难定位。
 - **webhook 里回复失败不能返回 5xx**：平台会重推事件，导致重复处理。回复一律 best-effort。
+- **QQ 同一 `msg_id` 回复多条要给不同 `msg_seq`**：否则第 2 条起被当重复消息丢弃，表现为"只收到第一张"。
+- **QQ 群主动消息要单独申请权限**（无权限报 `40034105`）；被动回复不需要。别用重试或补发队列去绕。
 - **QQ 验签必须用原始请求体**：先 `JSON.parse` 再 `stringify` 会改变字节，验签必失败。
 - **Workers 不能从 seed 直接生成 Ed25519 公钥**：用 PKCS#8 包装 seed 导入私钥，再 `exportKey("jwk")` 反推公钥。
+- **别让十几个随机图 API 进 cron**：子请求上限 + 随机 id 冲淡去重库。随机源只服务按需路径。
 - **shell heredoc 会吃掉 `\\`**：在 bash 里写含 `[\\s\\S]` 的测试脚本会变成 `[sS]`，正则失效。用编辑器写文件，别用 heredoc 传含反斜杠的代码。
 - **`wrangler dev` 停掉后子进程可能仍占端口**：换端口或用 `netstat -ano | grep 8787` 找到 PID 杀掉，否则请求会打到旧代码 + 旧环境变量上（表现为「明明配了 secret 却读不到」）。
 - **Windows 终端显示中文乱码**：`curl` 返回的 UTF-8 在 GBK 控制台里是乱码，但存储和响应本身是对的，别被误导。

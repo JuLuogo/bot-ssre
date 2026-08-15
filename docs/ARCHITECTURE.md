@@ -19,7 +19,7 @@
 Cron(UTC 01:00) ──┐
                   ├──→ pipeline.runOnce(env)
 POST /api/run ────┘         │
-                            │ 1. 遍历「启用」的数据源
+                            │ 1. 遍历「启用」的**榜单源**（排除随机图源，见第 5.1 节）
                             │    SourceAdapter.fetchRanking() → Illust[]
                             │    gelbooru · moebooru · pixiv · rss
                             │
@@ -40,10 +40,22 @@ POST /api/run ────┘         │
                                  结束时把摘要写入 D1 runs
 ```
 
+另一条独立的数据流是「按需返图」，不走 `runOnce`：
+
+```
+提示词触发（TG / QQ官方 / NapCat webhook）┐
+                                          ├──→ ondemand.fetchRandomIllusts(env, tags, count)
+后台「推送随机新图」→ pushRandomBatch ────┘         │
+                                                   │ 无关键词：随机图源（randompic + randomapi）
+                                                   │          随机排序、逐个尝试、失败自动切换、够数即停
+                                                   │ 有关键词：走支持 tag 的 booru（rating:safe）
+                                                   └ 不写 seen（随机图强制推，不做跨次去重）
+```
+
 关键取舍：**只有推送成功过的条目才写 seen**。若先标记再推送，一次网络抖动会让这张图永久丢失；反过来最坏情况只是下次重试。
 
 ## 3. 归一化：`Illust`
-四个数据源的字段差异被压平成同一结构，下游（过滤、去重、渠道）只认这一个类型：
+各数据源的字段差异被压平成同一结构，下游（过滤、去重、渠道）只认这一个类型：
 
 | 字段 | 含义 | 各源来源举例 |
 |---|---|---|
@@ -89,7 +101,33 @@ interface ChannelAdapter { name; push(env, illust, target, opts?): Promise<void>
 
 - 数据源注册表在 `src/sources/index.ts`，`sources.adapter` 字段就是这里的 key。
 - 渠道在 `pipeline` 中按配置装配，每个渠道带自己的 `opts`（如 Telegram 的 `apiBase`）。
-- `SourceOptions` 是各源参数的并集（`site` / `tags` / `mode` / `limit` / `label`），各适配器只取自己关心的字段——用一张 `sources` 表承载四种形态的代价最小。
+- `SourceOptions` 是各源参数的并集（`site` / `tags` / `mode` / `limit` / `label`），各适配器只取自己关心的字段——用一张 `sources` 表承载多种形态的代价最小。
+
+### 5.1 图源分工：榜单源 vs 随机源
+
+六个 adapter 分成两类，**服务两条不同的数据流**，这是刻意的：
+
+| 类别 | adapter | 参与 `runOnce`（定时/立即运行） | 参与按需返图与「推送随机新图」 |
+|---|---|---|---|
+| 榜单源 | `gelbooru` `moebooru` `pixiv` `rss` | ✅ | 仅带关键词时用 booru 做 tag 检索 |
+| 随机源 | `randompic` `randomapi` | ❌ 被 `runOnce` 显式排除 | ✅ 主力 |
+
+为什么随机源不进 `runOnce`：
+
+1. **子请求配额**。`randomapi` 预置了 16 个启用源，若每次 cron 都遍历，一次运行就要对十几个第三方 API 各发一次请求，叠加富媒体上传与推送（QQ 官方每图 2 次请求）后逼近 Workers 的子请求上限。按需返图则是随机排序、逐个尝试、**够数即停**，通常只打 1 个源。
+2. **语义与去重库**。定时推送的语义是「今天的排行榜新图」；随机图每次 id 都不同，永远"新"，会挤占 `perRunTotalCap` 并不断往 KV 去重库灌无意义的 key，把真正的榜单新图冲淡。
+
+反过来，随机源在按需路径上被优先使用：`ondemand.fetchRandomIllusts` 无关键词时只用随机源（自有 `randompic` 与第三方 `randomapi` 混在一起随机排序、失败自动切下一个），有关键词时才回落到支持 tag 的 booru。
+
+### 5.2 第三方随机图 API 的安全边界
+
+`randomapi` 的目标 URL **只能来自代码里的固定注册表** `src/sources/randomapi_providers.ts`，后台只能选 slug，不能填任意 URL——否则等于给后台开了一个 SSRF 入口。三层校验：
+
+1. `sources.site` 存的是 slug，`/api/sources` 写入时用 `getProvider(slug)` 校验，未知 slug 拒绝；`needsKey` 的源拒绝启用。
+2. 按 provider 声明的协议取图：`json`（用该源专属 `extract` 读字段）/ `redirect`（`redirect:"manual"` 读 `Location`）/ `direct`（端点本身即随机图，加随机参数生成多张互不相同的稳定 URL）。
+3. 最终图片 URL 必须 `https`，且满足 provider 声明的 `imageHosts` 后缀白名单；跳转域名不固定的源退化为「必须有图片扩展名」。
+
+单源单次外部请求上限 6、超时 12s。全部 provider 由迁移 `0006_randomapi_sources.sql` 预置（16 启用 / 2 needsKey 关闭），也可在后台点「一键补全全部随机图 API 源」（`POST /api/sources/seed-providers`，幂等）——后者不依赖迁移是否执行。**改注册表后要同步那个迁移文件**，审核结论记录在 `docs/RANDOM_IMAGE_APIS.md`。
 
 ## 6. 分级过滤
 「只推全年龄」在三个层面落实：
@@ -140,7 +178,7 @@ pub   = crypto.subtle.importKey("jwk", {kty:"OKP",crv:"Ed25519",x:jwk.x}, ..., [
 
 正确性用官方文档的示例值验证过：secret `DG5g3B4j9X2KOErG` + 示例 `plain_token/event_ts` 产出的签名与文档一致。Ed25519 是确定性签名，同样输入必然同样输出，因此这是强验证。
 
-## 10. QQ 官方机器人的两个特殊流程
+## 10. QQ 官方机器人的几个特殊流程
 **access_token**：`POST /app/getAppAccessToken`（body 里 `appId`/`clientSecret`）换取，有效期 7200 秒。缓存在 KV `qqbot:token`，存 `{token, exp}` 并提前 60 秒失效，同时给 KV 设同长度 TTL 兜底。官方在有效期内重复调用返回同一个值，所以不必担心并发刷新产生多份。
 
 **发图是两步**：官方不接受直接塞图片 URL 的消息，必须
@@ -148,6 +186,22 @@ pub   = crypto.subtle.importKey("jwk", {kty:"OKP",crv:"Ed25519",x:jwk.x}, ..., [
 2. `POST /v2/{groups|users}/{openid}/messages`，`{msg_type:7, media:{file_info}}`。
 
 代码里第 2 步会先尝试带 `content` 文案，被拒则自动回退为仅图片——因为不同环境对富媒体消息能否附带文本的行为不完全一致。
+
+**主动消息 vs 被动回复**（线上实测确认的硬约束）：
+
+| | 被动回复 | 主动消息 |
+|---|---|---|
+| 触发条件 | 请求体带用户消息的 `msg_id`，且在其后 5 分钟内 | 不带 `msg_id` |
+| 权限 | 无需额外权限 | **需在 QQ 开放平台单独申请** |
+| 额度 | 不占额度 | 按额度计费、有频控 |
+
+未获权限时向群发主动消息返回 `{"code":40034105,"message":"主动消息失败, 无权限"}`。实测同一次推送里 `user:` 目标成功、`group:` 目标全部 40034105 —— 即**单聊主动消息有额度、群聊没有**。由此推出三条实现：
+
+1. 提示词触发返图一律带 `msg_id` 走被动回复，所以群里的关键词返图不需要任何额外权限。
+2. `qqbot.push`（定时/手动推送）会先查 KV `qqbot:lastmsg:<target>`——webhook 每收到一条消息就把 `msg_id` 记进去（TTL 270s）——命中就按被动回复发，未命中才发主动消息。因此群内刚有人说话时，手动推送也能进群。
+3. 配置项 `qqbot.groupActivePush`（默认 true）关掉后，`assembleChannels` 直接过滤掉 `group:` 目标：申请不到权限时，群里只保留关键词触发，不再产生成批注定失败的请求。
+
+**同一 `msg_id` 回复多条必须给不同 `msg_seq`**，否则第 2 条起会被 QQ 当重复消息丢弃——返图张数 >1 时表现为「只收到第一张」。`sendImage` / `sendText` 都接受 `msgSeq`，返图循环里递增。
 
 ## 11. Telegram 发图的两条路径
 ```
@@ -187,11 +241,26 @@ return { ...env, ...overrides }   // KV/DB/ASSETS 等 binding 原样保留
 | 限制（免费版） | 影响 | 对策 |
 |---|---|---|
 | CPU 10 ms | 纯计算受限 | 全流程以 I/O 为主，`fetch` 等待不计 CPU；发图优先走「让对方服务器拉 URL」，不在 Worker 内处理图片字节 |
-| 子请求 50 次/调用 | 数据源 + 上传 + 推送次数受限 | `perRunTotalCap` 默认 10；QQ 官方每图需 2 次请求（上传+发送），目标多时要相应调小 |
+| 子请求 50 次/调用 | 数据源 + 上传 + 推送次数受限 | `perRunTotalCap` 默认 10；QQ 官方每图需 2 次请求（上传+发送），目标多时要相应调小；随机图源不参与 cron 遍历（第 5.1 节） |
+| **客户端断连即取消请求上下文** | webhook 里同步做重活会被中途掐断 | 见下方「webhook 必须立即应答」 |
 | Cron 传播延迟 ≤15 分钟 | 改 cron 后不立即生效 | 部署后耐心等待，并用 `/api/run` 手动验证逻辑 |
 | Cron at-least-once | 可能重复触发 | `exec:*` 幂等键 |
 | KV 最终一致 | 刚写的 seen 可能读不到 | 去重容忍极小概率重复；配置类数据一律不用 KV |
 | 无 DOMParser | 不能用 DOM 解析 RSS | RSS 用正则提取 `<item>/<entry>` 与图片（`<img>` / `media:content` / `enclosure`） |
+
+### webhook 必须立即应答，重活交给 `waitUntil`
+
+「抓随机图 → 富媒体上传 → 发消息」耗时可达数秒。若在 webhook 的请求处理里同步做完，平台侧（QQ / Telegram / NapCat）会先超时断开连接，而 **Cloudflare 在客户端断连时会取消该请求的上下文**，正在进行的 `fetch` 随之中止 —— 表现为「发了触发词完全没反应，也没有任何错误」。
+
+所以三个 webhook 都是同一结构：验签/匹配这些便宜的判断留在请求内，命中后**立刻返回 200**，把抓图与发送交给 `ctx.waitUntil(...)` 在后台跑完（`waitUntil` 的任务不受客户端断连影响）。这也顺带避免了平台超时重推导致的重复发图。
+
+对应地，后台失败必须**主动告知用户**：`replyIllusts` 在一张都没发出去时会回一句失败原因，而不是只 `console.warn`（静默失败曾经让这个问题极难定位）。
+
+### 诊断日志
+
+`src/diag.ts` 在 KV `diag:events` 维护一个 40 条的环形缓冲（TTL 7 天），记录每条到达的 QQ 消息事件（内容、当时的 `triggers`/`enabled`、是否命中）与返图/推送结果，后台「🩺 触发诊断」卡片展示（`GET /api/diag`，需登录）。
+
+刻意不落 D1：新表需要迁移，而本项目的迁移依赖 Cloudflare MCP 手动执行，MCP 不可用时表建不出来，诊断功能就会连带失效。有了它，「事件没到 / 没命中 / 命中后发送失败」三种情况可以一眼区分。
 
 ## 15. 失败隔离
 - 单个数据源抓取失败 → 记入 `errors`，其余源照常。

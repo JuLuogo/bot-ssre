@@ -6,18 +6,21 @@
 
 ## 功能
 - 定时爬取：Cron Trigger，默认每天北京时间 09:00（UTC 01:00）。
-- 数据源：Safebooru / Gelbooru、Pixiv 排行榜、Konachan（moebooru）、RSS / RSSHub。
-- 全年龄过滤：booru 按 `rating`，Pixiv 按 `illust_content_type`；可信源（RSS 订阅）可跳过过滤。
-- 去重：KV 记录已推送项（带 TTL），避免重复。
+- **榜单源**：Safebooru / Gelbooru、Pixiv 排行榜、Konachan（moebooru）、RSS / RSSHub —— 参与定时推送。
+- **随机图源**：自有静态图库（`randompic`）+ 18 个已审核的第三方随机图 API（`randomapi`，固定注册表、后台逐源开关、随机选择 + 失败自动切换）—— 只服务按需返图，不参与定时抓取。
+- **提示词触发返图**：在 Telegram / QQ 官方 / 个人 QQ 里发触发词即返图；触发词、张数、群内是否需 @、是否响应私聊都可在后台配。带关键词时改用 booru 做 tag 检索。
+- 全年龄过滤：booru 按 `rating`，Pixiv 按 `illust_content_type`；可信源（RSS 订阅、已确认全年龄的随机源）可跳过过滤。
+- 去重：KV 记录已推送项（带 TTL），避免重复；「推送随机新图」刻意不去重。
 - 订阅制：用户对 Telegram 或 QQ 官方机器人发送 `/start` 即可自助订阅（webhook）。
 - 推送渠道：Telegram（`sendPhoto`，支持自定义 **API 反代**）、**QQ 官方机器人**（QQ 开放平台 API v2）、个人 QQ（NapCat OneBot HTTP 中转）。
-- 管理后台：数据源/订阅增删改、渠道与全局设置、运行历史、最近推送画廊、手动触发。
-- 存储：**D1**（配置 / 推送记录 / 运行历史）+ **KV**（去重）。
+- 管理后台：全站登录门禁；数据源/订阅增删改、渠道与全局设置、运行历史、最近推送画廊、手动触发、**触发诊断日志**。
+- 存储：**D1**（配置 / 推送记录 / 运行历史）+ **KV**（去重 / token 缓存 / 诊断日志）。
 
 ## 文档
-- [技术原理](docs/ARCHITECTURE.md) — 架构与数据流、存储分层取舍、Ed25519 验签、平台限制与对策
+- [技术原理](docs/ARCHITECTURE.md) — 架构与数据流、榜单源与随机源的分工、SSRF 边界、QQ 主动消息与被动回复、Ed25519 验签、平台限制与对策
 - [部署文档](docs/DEPLOYMENT.md) — 从零上线的完整步骤、webhook 配置、验证清单、常见问题
 - [开发文档](docs/DEVELOPMENT.md) — 本地调试、如何扩展数据源/渠道/迁移、API 契约
+- [随机图 API 审核清单](docs/RANDOM_IMAGE_APIS.md) — 每个第三方源的官方地址、协议、分级、实测结果与接入/不接入结论
 
 ## 架构
 ```
@@ -202,26 +205,37 @@ Worker 无法常驻长连接，故 QQ 走**外部 NapCat 中转**：
 - Worker 调用 `POST {base}/send_group_msg`，用图文消息段发送。
 
 ## API 参考
+
+**除 `/api/login`、`/api/logout` 与三个 webhook 外，所有 `/api/*`（含只读）都需要登录**：先 `POST /api/login {password}` 换取 cookie 会话，后续请求带上该 cookie。未设置 `ADMIN_TOKEN` 时后台整体锁死（fail-closed）。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| POST | `/api/login` | 用 `ADMIN_TOKEN` 口令登录，下发会话 cookie |
+| POST | `/api/logout` | 清除会话 |
 | GET | `/api/status` | 环境、配置、上次运行、各项是否已配置 |
 | GET | `/api/recent` | 最近推送记录 |
 | GET | `/api/runs` | 运行历史 |
-| POST | `/api/run` | 手动触发一次（需 token） |
+| POST | `/api/run` | 手动跑一次榜单抓取推送 |
+| POST | `/api/push-random?count=` | 推送随机新图（1–20 张，不去重） |
+| GET / POST | `/api/ondemand` | 读 / 写提示词触发返图配置（触发词、张数、群内是否需 @、是否响应私聊） |
 | GET | `/api/sources` | 数据源列表 |
-| POST | `/api/sources` | 新增/更新数据源（带 id 即更新，需 token） |
-| DELETE | `/api/sources?id=` | 删除数据源（需 token） |
-| GET / POST | `/api/config` | 读 / 写渠道与全局设置（POST 需 token） |
+| POST | `/api/sources` | 新增/更新数据源（带 id 即更新；`randomapi` 只接受注册表里的 slug） |
+| DELETE | `/api/sources?id=` | 删除数据源 |
+| POST | `/api/sources/seed-providers` | 一键补全全部随机图 API 源（幂等，需密钥的源入库但不启用） |
+| GET | `/api/providers` | 第三方随机图 API 注册表（后台下拉用，只读） |
+| GET / DELETE | `/api/diag` | 读 / 清空触发诊断日志 |
+| GET / POST | `/api/config` | 读 / 写渠道与全局设置 |
 | GET | `/api/subscribers` | 订阅者列表 |
-| DELETE | `/api/subscribers?id=` | 删除订阅者（需 token） |
+| DELETE | `/api/subscribers?id=` | 删除订阅者 |
 | GET | `/api/credentials` | 凭证状态（只含掩码与来源） |
-| POST | `/api/credentials` | 写入凭证到 D1（白名单，需 token） |
-| DELETE | `/api/credentials?name=` | 清除 D1 凭证并回退 secret（需 token） |
-| POST | `/api/test?target=` | 连通性自检：telegram / qqbot / napcat（需 token） |
-| POST | `/tg/webhook` | Telegram 更新回调（/start /stop /status） |
-| POST | `/qq/webhook` | QQ 官方机器人回调（op=13 验证 + 订阅命令） |
+| POST | `/api/credentials` | 写入凭证到 D1（白名单） |
+| DELETE | `/api/credentials?name=` | 清除 D1 凭证并回退 secret |
+| POST | `/api/test?target=` | 连通性自检：telegram / qqbot / napcat |
+| POST | `/tg/webhook` | Telegram 更新回调（触发词返图 + /start /stop /status），校验 secret token |
+| POST | `/qq/webhook` | QQ 官方机器人回调（op=13 验证 + 触发词返图 + 订阅命令），Ed25519 验签 |
+| POST | `/onebot/webhook` | 个人 QQ（NapCat）上报，命中触发词才处理；配了 secret 则 HMAC 验签 |
 
-写操作请求头：`Authorization: Bearer <ADMIN_TOKEN>`。
+三个 webhook 各自验签，保持公开；它们都是**立刻回 200，然后在 `ctx.waitUntil()` 里抓图并发送**（见[技术原理](docs/ARCHITECTURE.md)第 14 节）。
 
 ## 修改定时频率
 
@@ -229,8 +243,10 @@ Worker 无法常驻长连接，故 QQ 走**外部 NapCat 中转**：
 `"0 1 * * *"` = 每天北京 09:00；`"0 */6 * * *"` = 每 6 小时。改后重新部署。
 
 ## 说明与风险
-- 分级：booru / Pixiv 默认只推全年龄；RSS 订阅视为可信不过滤，请自行确认来源。
-- 去重：`seenTtlDays` 天后同一条可再次推送；榜单每日变化，通常不会刷屏。
+- 分级：booru / Pixiv 默认只推全年龄；RSS 订阅与已确认全年龄的随机源视为可信不过滤，请自行确认来源。
+- 第三方随机图 API：目标 URL 只能来自代码内的固定注册表，后台不能填任意 URL（防 SSRF）；需要密钥的源入库但不可启用。
+- **QQ 官方群主动推送需要单独申请「主动消息」权限**，未获权限时会返回 `40034105`。带 `msg_id` 的被动回复（关键词触发返图）不需要该权限；申请不到时可在后台关掉「向 QQ 群主动推送」，群里只用关键词触发。
+- 去重：`seenTtlDays` 天后同一条可再次推送；榜单每日变化，通常不会刷屏。「推送随机新图」刻意不去重。
 - QQ 走非官方框架 NapCat，有账号风险，请知悉。
 - 版权：仅供个人自用；公开分发 / 商用请自行确认各来源授权。
 - D1 免费额度（写 10 万行/天、读 500 万行/天）对本场景绰绰有余。

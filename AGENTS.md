@@ -37,116 +37,73 @@ Workers Builds 从 GitHub 拉代码构建；**只在本地改、不 push，线�
 ### 6. 按需图内容保持全年龄
 OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllAges` 过滤），**不接 explicit/NSFW 分级**。
 
-### 7. 验证
-- 后端改动跑 `npx tsc --noEmit`。
-- 需要本地跑时用 `npx wrangler dev --local`；测登录要注入密钥（`--var ADMIN_TOKEN:<值>` 或写 `.dev.vars`），本地 D1 先 `npx wrangler d1 migrations apply acg-db --local` 建表。
-- 收尾清理临时文件、还原 `.dev.vars` 等本地改动。
+### 7. webhook 必须立即应答，重活交给 `waitUntil`
+「抓图 → 富媒体上传 → 发送」要数秒；在 webhook 请求里同步做完，平台会先超时断连，而**客户端断连会取消 Worker 请求上下文**，发送被中途掐断且完全静默（踩过这个坑，排查代价很大）。
+三个 webhook（`qqbot_webhook.ts` / `telegram_bot.ts` / `onebot_webhook.ts`）统一：验签与触发匹配留在请求内 → **立刻回 200** → `ctx.waitUntil()` 里完成抓图与发送。
+后台任务失败要**回一句话告诉用户**，不要只 `console.warn`。
+
+### 8. 图源分工：榜单源进 cron，随机源只服务按需
+- 榜单源 `gelbooru` / `moebooru` / `pixiv` / `rss` → 参与 `runOnce`（定时 + 立即运行）。
+- 随机源 `randompic` / `randomapi` → **被 `runOnce` 显式排除**，只服务「提示词触发返图」与「推送随机新图」。
+理由：16 个启用的第三方 API 若每次 cron 都遍历会逼近子请求上限；随机图 id 每次都不同，会挤占 `perRunTotalCap` 并往去重库灌无意义 key。详见 `docs/ARCHITECTURE.md` 5.1。
+
+### 9. 第三方随机图 API 只能来自固定注册表
+`src/sources/randomapi_providers.ts` 是唯一来源，后台只能选 slug、**不能填任意 URL**（否则等于开了 SSRF 入口）。
+最终图片 URL 强制 https + `imageHosts` 白名单（域名不固定的源退化为图片扩展名校验）。`needsKey` 的源可入库但拒绝启用。
+**改注册表后要同步 `migrations/0006_randomapi_sources.sql`**；审核结论只记在 `docs/RANDOM_IMAGE_APIS.md`，未通过的不进注册表。
+
+### 10. QQ 群主动消息无权限是平台限制，别再加重试/队列
+向群发主动消息返回 `{"code":40034105,"message":"主动消息失败, 无权限"}`（实测：同一次推送 `user:` 成功、`group:` 全失败）。
+带 `msg_id` 的被动回复不需要该权限，所以群里关键词返图是好的。已有对策：`qqbot.push` 复用 KV `qqbot:lastmsg:<target>` 的 5 分钟窗口；配置 `qqbot.groupActivePush=false` 时直接过滤掉 `group:` 目标。
+用户已否决「失败挂队列、等群内下次发言补发」的方案（行为不可预期）。同一 `msg_id` 回复多条必须给不同 `msg_seq`。
+
+### 11. 验证
+- 后端改动跑 `npx tsc --noEmit`，再跑 `npx wrangler deploy --dry-run`。
+- 改了 `public/index.html` 的内联脚本，至少做一次语法校验（`new Function(scriptText)`）并确认新增元素 id 存在。
+- 迁移改动：用独立本地 D1 验证幂等 —— `npx wrangler d1 migrations apply acg-db --local --persist-to .tmp-d1`，再把同一 SQL `--file` 执行两遍，确认行数不变。
+- 需要本地跑时用 `npx wrangler dev --local`；测登录要注入密钥（`--var ADMIN_TOKEN:<值>` 或写 `.dev.vars`）。
+- 收尾清理临时文件（`.tmp-*`）、还原 `.dev.vars` 等本地改动。
 
 ---
 
-# 当前工作进度（截至 2026-08-14）
+# 当前工作进度（截至 2026-08-15）
 
-> 本节记录进行中的工作终止点，供下一次开工接续。**更新本文件时请顺带刷新本节。**
+> 本节只记「现在的状态 + 下一步」。设计原理与踩坑结论沉淀在 `docs/ARCHITECTURE.md`，
+> 第三方源审核结论在 `docs/RANDOM_IMAGE_APIS.md`。**更新本文件时请顺带刷新本节。**
 
-## 已完成并已推送（线上生效）
-- 后台全量登录门禁（`src/auth.ts`，ADMIN_TOKEN 口令，fail-closed）✅ 已部署
-- QQ 官方回调 op=13 走快路径（Worker Secret 优先，2ms）→ **回调验证已通过** ✅
-- Pixiv 榜单 API 反代 `PIXIV_API_BASE`（绕开 Cloudflare IP 被 Pixiv 封 403）✅ 已部署
-- 手动「推送随机新图」按钮（可填张数、不去重、随机 booru）✅ 已部署
-- 提示词触发返图扩展到全平台（TG / QQ官方 / NapCat）+ 触发词/张数后台可配 ✅ 已部署
+## 状态：功能已全部完成并推送，QQ 官方端用户实测无 bug
 
-## 进行中：接入自有静态随机图库（randompic）
+| 模块 | 状态 |
+|---|---|
+| 后台全量登录门禁（ADMIN_TOKEN，fail-closed） | ✅ 线上生效 |
+| QQ 官方回调 op=13 快路径（Worker Secret，~2ms） | ✅ 回调验证通过 |
+| Pixiv 榜单反代 `PIXIV_API_BASE`（绕开 Pixiv 封 Cloudflare IP） | ✅ 线上生效 |
+| 提示词触发返图（TG / QQ官方 / NapCat，触发词与张数后台可配） | ✅ 用户实测正常 |
+| 手动「推送随机新图」（张数可填、不去重） | ✅ 私聊正常；群聊受 QQ 主动消息权限限制 |
+| 自有静态图库 `randompic`（`pic.060730.xyz`） | ✅ 已接入并默认优先 |
+| 第三方随机图 API `randomapi`（18 源预置，16 启用 / 2 需密钥关闭） | ✅ 已入库 |
+| 触发诊断日志（KV 环形，后台「🩺 触发诊断」） | ✅ 可用 |
 
-**randompic 代码、迁移和 API 审核文档已推送到 origin/main（randompic commit `26744d9`，文档收尾 commit `b67ca7c`）；等待 Workers Builds 自动部署后做线上验证。**
+## 剩余待办
 
-| 状态 | 文件 | 说明 |
-|---|---|---|
-| 新增 ✅ | `src/sources/randompic.ts` | 读 `random.js` counts → 服务端随机编号 → 拼 `{site}/ri/{type}/{num}.webp`；每类 HEAD 健康检查；manifest 缓存 KV 15min；单批 Set 去重 |
-| 新增 ✅ | `migrations/0005_randompic.sql` | 默认插入自有图库数据源（幂等，已本地验证重复执行只 1 条） |
-| 修改 ✅ | `src/types.ts` | `SourceConfig.adapter` 加 `randompic` |
-| 修改 ✅ | `src/sources/index.ts` | 注册 randompic 适配器 |
-| 修改 ✅ | `src/ondemand.ts` | `fetchRandomIllusts` 无关键词时优先 randompic，带关键词回退 booru |
-| 修改 ✅ | `public/index.html` | 下拉加 randompic 选项 + hint |
-| 修改 ✅ | `docs/DEPLOYMENT.md` / `.gitignore` | 文档与忽略 `.serena/` |
-| 新增 ✅ | `docs/RANDOM_IMAGE_APIS.md` | 已补完 7 节、共 50 个候选/实测项，并区分推荐、待审、候选、失效，不会自动启用第三方源 |
+1. **用户侧**：去 QQ 开放平台确认能否开通群主动消息权限。开不了就在后台取消勾选「向 QQ 群主动推送」，
+   群里改为只用关键词触发（见固定约定第 10 条）。开通入口未在官方文档核实到确切路径，可问「QQ 机器人反馈助手」。
+2. **线上验证随机源**：后台「数据源」应有 18 行 `randomapi`（没有就点「一键补全全部随机图 API 源」）；
+   多次触发返图后在「🩺 触发诊断」里看 `来源=` 是否在不同源之间轮换，以确认多源随机 + 故障切换生效。
+3. 可选：若希望每日定时推送也混入随机图，需要新增开关（当前按第 8 条约定刻意排除）。
 
-**本地验证结果（可信）：**
-- `npx tsc --noEmit` ✅ EXIT:0
-- 迁移幂等：独立本地 D1 连续 apply 两次，randompic 数据源仅 1 条 ✅
-- 适配器执行测试：取 10 张 → 10 张去重、全部 `pic.060730.xyz`、自动跳过当前 404 的 `j` 类、第二次调用命中 KV 缓存（0 次外部请求）✅
+## 关键事实（勿再踩坑 / 勿再猜）
 
-**关键事实（勿再踩坑）：**
-- 图片域名**只用 `https://pic.060730.xyz`**；`pic.0721030.xyz` 不可用（523），**忽略不探测**。
-- 图库当前 `h=979, v=3596, j=1793`，`j` 路径当前 404 → 适配器自动跳过。
-- 自有图库已确认 **100% 全年龄**，适配器标 `rating: "safe"`，无需再过滤。
+- 自有图库只用 `https://pic.060730.xyz`；`pic.0721030.xyz` 不可用（523），**忽略不探测**。
+  图库 counts 由 `random.js` 运行时读取（曾见 `h=979, v=3596, j=1793`，`j` 当时 404 → 适配器自动跳过）。
+  用户已确认该库 **100% 全年龄**，适配器直接标 `rating:"safe"`。
+- QQ 群主动消息 `40034105` 无权限：平台限制，代码绕不过去（详见固定约定第 10 条）。
+- `nekos-best` / `waifu-im` 对机房 IP 有风控（本机实测返 0 张），保持启用，线上会自动切下一个源。
+- 触发词匹配对「色 / 涩」不区分，另兼容 ASCII 大小写、全角空格、开头残留 `@xxx`。
 
-## 待办（下次开工按序执行）
-1. 线上验证 randompic + randomapi（见下）。
-2. 部署后线上验证：后台「数据源」新增一行选 `randomapi` → 下拉选一个源（如 `pic-re`/`alcy-moe`）启用 → 点「推送随机新图」/ 私聊发触发词，应收到该源的图片。
-3. randompic：后台出现「自有随机图库」；无关键词返图应来自 `pic.060730.xyz`。
-4. 逐个启用第三方源观察错误/耗时；被 IP 风控的源（nekos.best/waifu.im/lolicon）会自动故障切换。
+## 环境/账号备注
 
-## 已完成：第三方随机图 API 注册表（randomapi）— commit `8519d1f` 已推送
-
-- `src/sources/randomapi_providers.ts`：审核通过的源固定注册表（json/redirect/direct 三协议 + needsKey 锁定项）；后台只能选 slug，不能填任意 URL（防 SSRF）。
-- `src/sources/randomapi.ts`：按协议取稳定图片 URL，https+域名白名单/扩展名校验、去重、单源上限 6、超时 12s。
-- `ondemand.fetchRandomIllusts`：无关键词聚合 randompic+randomapi 随机顺序故障切换；带关键词走 booru。
-- `api`：`GET /api/providers`；`/api/sources` 校验 randomapi slug、需密钥拒启用。
-- 后台数据源表单加 randomapi 选项 + provider 下拉。
-- 用户审核结论：`docs/RANDOM_IMAGE_APIS.md` 第 6 节全部不接，其余接入。
-- 本地实测：redirect(alcy)/direct(pic.re)/json(nekosia,nekos-life) 均返回合法去重 URL；needsKey/未知 slug 返回空；非 200 源自动回退（nekos.best/lolicon 从本机 IP 被 403，属预期）。
-
-## 环境/账号备注（2026-08-15）
 - Worker：`bot-ssre`；后台 `https://bot-ssre.juluogogo.workers.dev`（或 `https://bot-ces.060730.xyz`）。
-- `randompic`(commit `26744d9`) 与 `randomapi`(commit `8519d1f`) 均已推送 origin/main。
-- 本会话 `cloudflare-builds` / `cloudflare-observability` MCP 断开；`cloudflare-bindings` 可用。工作区 `.claude/` 未跟踪（计划/临时目录，勿提交）。
-
-## 进行中：QQ 官方「触发词无反应 / 群聊收不到推送」修复（2026-08-15）
-
-用户实测症状：① 私聊发触发词无任何反应；② 后台「推送随机新图」能到私聊，**群聊收不到**；③ `/start` 能正常回复。
-
-已定位并修复（本地 `npx tsc --noEmit` ✅、`wrangler deploy --dry-run` ✅、matchTrigger 13 例单测全 PASS）：
-
-| 问题 | 根因 | 修复 |
-|---|---|---|
-| 触发词无反应 | webhook 里同步做「抓图 + 富媒体上传 + 发送」耗时数秒，QQ/TG/NapCat 侧先超时断连 → Worker 请求上下文被取消，发送半途中止（`/start` 只发文本很快所以正常） | 三个 webhook 全部改为**立刻回 200 + `ctx.waitUntil()` 后台完成**（`qqbot_webhook.ts` / `telegram_bot.ts` / `onebot_webhook.ts`，入口 `index.ts` 传 `ctx`） |
-| 多张图只到第一张 | 同一 `msg_id` 被动回复必须带**不同 `msg_seq`**，否则被 QQ 当重复消息丢弃 | `sendImage`/`sendText` 增加 `msgSeq` 参数，返图循环里递增 |
-| 群聊收不到主动推送 | QQ 官方对**群主动消息**有报备/频次限制（被动回复不受限） | 记住该会话最近 msg_id（KV `qqbot:lastmsg:<target>`，TTL 270s），`qqbot.push` **优先按被动回复发**，失败再退回主动消息 |
-| 看不到失败原因 | 「推送随机新图」只 toast 错误条数；错误文本是英文原始 JSON | `explainQQError()` 按 message 关键字补中文提示（不硬编码官方码值，原始返回保留）；后台推送结果**直接展开错误列表**，并新增 `summary.notes` 显示本次实际尝试的渠道与目标（可判断群是不是根本没进目标列表） |
-| 发「色图」不触发 | 后台触发词是「涩图」，与「色图」是不同汉字 | `matchTrigger` 归一化：**色/涩 同字**、ASCII 大小写、全角空格、开头残留 `@xxx`；默认触发词补 `色图`、`来张图`（关键词 tag 仍取原文，不改写） |
-
-**待线上验证（部署后按序）：**
-1. 私聊发「涩图」/「色图」→ 应返图（若仍无反应，看后台运行历史/日志）。
-2. 群里 @机器人 发触发词 → 应返图（被动回复，不占额度）。
-3. **群里先随便发一条消息**，5 分钟内点后台「推送随机新图」→ 应能进群（走被动窗口）；结果区会列出 `qqbot 目标(N): group:… , user:…` 与失败原因。
-4. 若群里 5 分钟窗口外仍收不到，且错误提示「主动消息待审核/未报备」→ 需去 QQ 开放平台申请群主动消息额度，这是平台限制而非代码问题。
-5. randompic / randomapi 的线上验证（见上一节待办）仍未做。
-
-### 结论（已用线上实测确认，勿再猜）
-
-- **触发词返图已正常工作**（被动回复路径通了）。
-- **群主动推送失败的确切原因**：QQ 返回 `{"code":40034105,"message":"主动消息失败, 无权限"}`。
-  同一次推送里 `user:` 目标成功、`group:` 目标全部 40034105 → **单聊主动消息有额度，群聊主动消息无权限**。
-  这是 QQ 开放平台侧权限，代码绕不过去；被动回复（带 `msg_id`，5 分钟内）不需要该权限。
-- 按用户决策**撤销**了"发不出去就挂队列、等群内下次发言补发"的设计（行为不可预期）。
-  改为后台开关 `qqbot.groupActivePush`（默认 true）：关掉后 `assembleChannels` 过滤掉 `group:` 目标，
-  群里只保留关键词触发返图，不再产生成批的 40034105 失败。
-- 保留的增益：`qqbot.push` 会优先复用 KV 里 5 分钟内的 `msg_id` 走被动回复，所以群内刚有人说话时手动推送仍可能成功。
-
-**下次开工待办：**
-1. 用户去 QQ 开放平台确认能否开通群主动消息权限；开不了就在后台取消勾选「向 QQ 群主动推送」。
-2. randompic / randomapi 的线上验证（见上一节待办）仍未做。
-
-## 已完成：全部随机图 API 源预置入库（2026-08-15）
-
-用户确认 QQ 官方端功能已无 bug，要求把注册表里的源全部预置好、需密钥的不启用。
-
-- `migrations/0006_randomapi_sources.sql`：18 条 `randomapi` 数据源（16 启用 / 2 needsKey 关闭），
-  幂等（按 `adapter+site(slug)` 守卫），**由注册表生成**——改注册表后要同步本文件。
-- 兜底入口 `POST /api/sources/seed-providers`（需登录）+ 后台「一键补全全部随机图 API 源」按钮：
-  与迁移做同一件事，但不依赖迁移是否执行（MCP 断开时仍可用）。
-- `runOnce` 现在**排除** `randompic` / `randomapi`：它们是随机图源，只服务提示词返图与「推送随机新图」。
-  理由：避免每次 cron 对十几个第三方 API 各发一次请求（子请求上限），也避免随机 id 冲淡去重库与每日榜单。
-- 验证：独立本地 D1（`--persist-to .tmp-d1`）迁移 apply ✅；同一 SQL 再执行两次后仍 18 行 / 18 个不同 slug / 16 启用 ✅；
-  逐源实测 14/16 返回合法直链，`nekos-best` 与 `waifu-im` 从本机 IP 被风控返 0 张（保持启用，线上自动切换）。
+- 本会话 `cloudflare-builds` / `cloudflare-observability` MCP 断开（HTTP 405），因此线上日志/构建只能靠后台诊断卡片与运行历史。
+- 工作区 `.claude/` 未跟踪（计划/临时目录，勿提交）。
 
