@@ -39,21 +39,29 @@ export const pixiv: SourceAdapter = {
       headers: PIXIV_BROWSER_HEADERS,
     });
     const contents = data.contents ?? [];
-    return contents.slice(0, opts.limit).map((c): Illust => {
-      const ct = c.illust_content_type ?? {};
-      const safe = (ct.sexual ?? 0) === 0 && !ct.lo && !ct.grotesque;
-      return {
-        source: "pixiv",
-        id: String(c.illust_id),
-        title: c.title || `#${c.illust_id}`,
-        author: c.user_name || "",
-        imageUrl: String(c.url || "").replace("i.pximg.net", host),
-        pageUrl: `https://www.pixiv.net/artworks/${c.illust_id}`,
-        rating: safe ? "safe" : (ct.sexual ?? 0) >= 2 ? "explicit" : "questionable",
-        score: Number(c.view_count) || 0,
-        tags: Array.isArray(c.tags) ? c.tags : [],
-        rank: Number(c.rank) || undefined,
-      };
-    });
+    return contents
+      // 丢弃 pixiv 的"受限/需登录"占位图（url 落在 s.pximg.net/common/.../limit_unviewable*）：
+      // 它不是真作品，推过去只是一张灰色占位 PNG。
+      .filter((c) => {
+        const u = String(c.url || "");
+        return u && !u.includes("limit_unviewable") && !u.includes("s.pximg.net/common");
+      })
+      .slice(0, opts.limit)
+      .map((c): Illust => {
+        const ct = c.illust_content_type ?? {};
+        const safe = (ct.sexual ?? 0) === 0 && !ct.lo && !ct.grotesque;
+        return {
+          source: "pixiv",
+          id: String(c.illust_id),
+          title: c.title || `#${c.illust_id}`,
+          author: c.user_name || "",
+          imageUrl: String(c.url || "").replace("i.pximg.net", host),
+          pageUrl: `https://www.pixiv.net/artworks/${c.illust_id}`,
+          rating: safe ? "safe" : (ct.sexual ?? 0) >= 2 ? "explicit" : "questionable",
+          score: Number(c.view_count) || 0,
+          tags: Array.isArray(c.tags) ? c.tags : [],
+          rank: Number(c.rank) || undefined,
+        };
+      });
   },
 };

@@ -104,6 +104,10 @@ export function isActiveMsgDenied(msg: string): boolean {
 
 /** 富媒体 URL 上传，换取 file_info（file_type=1 为图片） */
 async function uploadMedia(token: string, scope: string, openid: string, url: string): Promise<string> {
+  // 预热：QQ 服务器拉图有下载超时，若图片 URL 是跨境冷回源(如 Cloudflare 反代 → pixiv，
+  // 实测冷启动可达 10s+)，QQ 会超时报 40093007「富媒体文件下载失败」。
+  // 先让 Worker 自己拉一次，把回源结果灌进 CDN 缓存，QQ 随后再拉就命中缓存(快)。best-effort。
+  await warmImageUrl(url);
   const res = await fetch(`${API}/v2/${scope}/${openid}/files`, {
     method: "POST",
     headers: authHeaders(token),
@@ -114,6 +118,21 @@ async function uploadMedia(token: string, scope: string, openid: string, url: st
   const j = JSON.parse(txt) as { file_info?: string };
   if (!j.file_info) throw new Error(`富媒体上传未返回 file_info: ${txt}`);
   return j.file_info;
+}
+
+/**
+ * 预热图片 URL：把它拉一遍并读完，促使 CDN 完成回源并缓存，
+ * 使 QQ 后续下载命中缓存、避免冷回源超时。
+ * 跳过 direct 随机源(带 _cb= 一次性参数，内容不稳定、预热无意义)。best-effort，失败不阻断。
+ */
+async function warmImageUrl(url: string): Promise<void> {
+  if (url.includes("_cb=")) return;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+    if (res.ok) await res.arrayBuffer();
+  } catch {
+    // 预热失败就算了，QQ 仍会尝试直接拉
+  }
 }
 
 /**
