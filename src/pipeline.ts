@@ -14,6 +14,13 @@ import { diag } from "./diag";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Workers 单次调用子请求超限（免费版 50/次）。命中后应停止本次剩余发送，而不是继续刷同样的错。 */
+class SubrequestLimit extends Error {}
+const isSubrequestLimit = (m: string) => /too many subrequests/i.test(m);
+const SUBREQUEST_HINT = (sent: number) =>
+  `已达单次子请求上限（免费版 50 次/调用）：QQ 每张图需 2 次请求（上传+发送），本次发出约 ${sent} 张后停止。` +
+  `请把「张数」调小到 10 张左右；要一次推更多需升级 Workers 付费版（1000 次/调用）。`;
+
 interface ChannelSpec {
   adapter: ChannelAdapter;
   targets: string[];
@@ -53,7 +60,10 @@ async function pushIllustToChannels(env: Env, it: Illust, channels: ChannelSpec[
         await ch.adapter.push(env, it, target, ch.opts);
         if (!okChannels.includes(ch.adapter.name)) okChannels.push(ch.adapter.name);
       } catch (e) {
-        errors.push(`[${ch.adapter.name}->${target}] ${it.source}:${it.id} ${errMsg(e)}`);
+        const m = errMsg(e);
+        errors.push(`[${ch.adapter.name}->${target}] ${it.source}:${it.id} ${m}`);
+        // 子请求超限：本次调用的额度已耗尽，继续发只会全是同样的错，直接中止本轮
+        if (isSubrequestLimit(m)) throw new SubrequestLimit();
       }
     }
   }
@@ -129,23 +139,28 @@ export async function runOnce(env: Env): Promise<RunSummary> {
   }
   summary.notes = channels.map((c) => `${c.adapter.name} 目标(${c.targets.length}): ${c.targets.join(", ")}`);
   // 4) 逐图推送，成功任一渠道即标记已推送并写记录
-  for (const it of picked) {
-    const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
-    if (okChannels.length > 0) {
-      await markSeen(env, it.source, it.id, cfg.seenTtlDays);
-      summary.pushed++;
-      summary.perSource[it.source] = (summary.perSource[it.source] ?? 0) + 1;
-      await recordPush(env, {
-        source: it.source,
-        id: it.id,
-        title: it.title,
-        author: it.author,
-        imageUrl: it.imageUrl,
-        pageUrl: it.pageUrl,
-        pushedAt: Date.now(),
-        channels: okChannels,
-      });
+  try {
+    for (const it of picked) {
+      const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
+      if (okChannels.length > 0) {
+        await markSeen(env, it.source, it.id, cfg.seenTtlDays);
+        summary.pushed++;
+        summary.perSource[it.source] = (summary.perSource[it.source] ?? 0) + 1;
+        await recordPush(env, {
+          source: it.source,
+          id: it.id,
+          title: it.title,
+          author: it.author,
+          imageUrl: it.imageUrl,
+          pageUrl: it.pageUrl,
+          pushedAt: Date.now(),
+          channels: okChannels,
+        });
+      }
     }
+  } catch (e) {
+    if (!(e instanceof SubrequestLimit)) throw e;
+    summary.errors.push(SUBREQUEST_HINT(summary.pushed));
   }
 
   summary.notes = buildNotes(cfg, channels, summary.errors);
@@ -184,22 +199,27 @@ export async function pushRandomBatch(env: Env, count: number): Promise<RunSumma
   const channels = await assembleChannels(env, cfg);
   if (channels.length === 0) summary.errors.push("没有可用的推送目标（检查渠道开关、token 与目标 id）");
 
-  for (const it of illusts) {
-    const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
-    if (okChannels.length > 0) {
-      summary.pushed++;
-      summary.perSource[it.source] = (summary.perSource[it.source] ?? 0) + 1;
-      await recordPush(env, {
-        source: it.source,
-        id: it.id,
-        title: it.title,
-        author: it.author,
-        imageUrl: it.imageUrl,
-        pageUrl: it.pageUrl,
-        pushedAt: Date.now(),
-        channels: okChannels,
-      });
+  try {
+    for (const it of illusts) {
+      const okChannels = await pushIllustToChannels(env, it, channels, summary.errors);
+      if (okChannels.length > 0) {
+        summary.pushed++;
+        summary.perSource[it.source] = (summary.perSource[it.source] ?? 0) + 1;
+        await recordPush(env, {
+          source: it.source,
+          id: it.id,
+          title: it.title,
+          author: it.author,
+          imageUrl: it.imageUrl,
+          pageUrl: it.pageUrl,
+          pushedAt: Date.now(),
+          channels: okChannels,
+        });
+      }
     }
+  } catch (e) {
+    if (!(e instanceof SubrequestLimit)) throw e;
+    summary.errors.push(SUBREQUEST_HINT(summary.pushed));
   }
 
   summary.notes = buildNotes(cfg, channels, summary.errors);

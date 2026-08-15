@@ -55,7 +55,10 @@ async function replyIllusts(
         await sendImage(env, target, il, msgId, seq++);
         ok++;
       } catch (e) {
-        fails.push(err(e));
+        const m = err(e);
+        fails.push(m);
+        // 子请求超限：本次调用额度已耗尽，继续发只会同样失败，停止
+        if (/too many subrequests/i.test(m)) break;
       }
     }
     await diag(env, "qqbot", `发送结果 成功 ${ok}/${illusts.length}，耗时 ${Date.now() - t0}ms` + (fails.length ? `｜失败: ${fails.join(" ‖ ")}` : ""));
