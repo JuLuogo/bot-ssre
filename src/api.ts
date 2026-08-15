@@ -207,8 +207,34 @@ export async function handleApi(request: Request, env: Env, _ctx: ExecutionConte
     }
   }
 
-  if (pathname === "/api/sources") {
-    if (method === "GET") return json({ ok: true, items: await listSources(env) });
+  // 一键预置：把注册表里所有 provider 补齐为数据源（幂等，按 slug 去重）。
+  // 需密钥的 provider 也会加入，但 enabled=0，后台可见不可启用。
+  // 迁移 0006 做的是同一件事；这里提供一个不依赖迁移执行的入口。
+  if (pathname === "/api/sources/seed-providers" && method === "POST") {
+    const existing = new Set(
+      (await listSources(env)).filter((s) => s.adapter === "randomapi").map((s) => (s.site ?? "").trim()),
+    );
+    const metas = listProviderMeta();
+    let added = 0;
+    let order = 10;
+    for (const p of metas) {
+      order += 1;
+      if (existing.has(p.slug)) continue;
+      await upsertSource(env, {
+        adapter: "randomapi",
+        enabled: !p.needsKey,
+        label: p.name,
+        site: p.slug,
+        limit: 3,
+        trusted: true,
+        sortOrder: order,
+      });
+      added++;
+    }
+    return json({ ok: true, added, skipped: metas.length - added, items: await listSources(env) });
+  }
+
+  if (pathname === "/api/sources") {    if (method === "GET") return json({ ok: true, items: await listSources(env) });
     if (method === "POST") {
       const b = (await request.json().catch(() => null)) as Partial<SourceConfig> | null;
       if (!b || !b.adapter || !b.label) return json({ ok: false, error: "invalid source（需 adapter 和 label）" }, 400);

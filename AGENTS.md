@@ -137,3 +137,16 @@ OneBot 按需命令（`涩图` / `/setu`）只返回 `rating:safe`（经 `isAllA
 1. 用户去 QQ 开放平台确认能否开通群主动消息权限；开不了就在后台取消勾选「向 QQ 群主动推送」。
 2. randompic / randomapi 的线上验证（见上一节待办）仍未做。
 
+## 已完成：全部随机图 API 源预置入库（2026-08-15）
+
+用户确认 QQ 官方端功能已无 bug，要求把注册表里的源全部预置好、需密钥的不启用。
+
+- `migrations/0006_randomapi_sources.sql`：18 条 `randomapi` 数据源（16 启用 / 2 needsKey 关闭），
+  幂等（按 `adapter+site(slug)` 守卫），**由注册表生成**——改注册表后要同步本文件。
+- 兜底入口 `POST /api/sources/seed-providers`（需登录）+ 后台「一键补全全部随机图 API 源」按钮：
+  与迁移做同一件事，但不依赖迁移是否执行（MCP 断开时仍可用）。
+- `runOnce` 现在**排除** `randompic` / `randomapi`：它们是随机图源，只服务提示词返图与「推送随机新图」。
+  理由：避免每次 cron 对十几个第三方 API 各发一次请求（子请求上限），也避免随机 id 冲淡去重库与每日榜单。
+- 验证：独立本地 D1（`--persist-to .tmp-d1`）迁移 apply ✅；同一 SQL 再执行两次后仍 18 行 / 18 个不同 slug / 16 启用 ✅；
+  逐源实测 14/16 返回合法直链，`nekos-best` 与 `waifu-im` 从本机 IP 被风控返 0 张（保持启用，线上自动切换）。
+

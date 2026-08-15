@@ -88,8 +88,14 @@ export async function runOnce(env: Env): Promise<RunSummary> {
   };
 
   // 1) 拉取各启用数据源；trusted 源（如 RSS 订阅）跳过全年龄过滤
+  // randompic / randomapi 是「随机图源」，不是榜单源：它们只服务提示词返图和「推送随机新图」。
+  // 定时抓取不带它们，否则每次运行会对十几个第三方 API 各发一次请求（子请求上限风险），
+  // 且随机图 id 每次都不同，会把去重库和每日榜单推送冲淡。
+  const rankingSources = cfg.sources.filter(
+    (x) => x.enabled && x.adapter !== "randompic" && x.adapter !== "randomapi",
+  );
   const candidatesAll: Illust[] = [];
-  for (const s of cfg.sources.filter((x) => x.enabled)) {
+  for (const s of rankingSources) {
     const adapter = getSourceAdapter(s.adapter);
     if (!adapter) {
       summary.errors.push(`未知数据源适配器: ${s.adapter}`);

@@ -10,8 +10,20 @@
 
 用户审核结论：第 6 节（失效/不建议）**全部不接入**；其余通过。已按各源协议写入固定注册表，后台「数据源」里选 `randomapi` → 下拉选择即可开关，**不能填任意 URL**（防 SSRF）。多个启用源随机选择 + 失败自动切换。
 
-- **已接入·可直接启用**：`lolicon`(支持关键词)、`nekos-best`、`nekosia`、`nekos-life`、`purrbot`、`waifu-im`、`nekos-dev`、`alcy-moe`、`alcy-mp`、`alcy-ycy`、`paugram`、`loliapi-acg`、`jitsu`、`nekosapi-file`、`pic-re`、`dmoe`。
-- **已登记·需密钥（后台展示但不可启用）**：`unsplash`、`waifu-it`（缺凭证入口）。
+**已全部预置入库**（迁移 `migrations/0006_randomapi_sources.sql`，幂等；也可在后台点「一键补全全部随机图 API 源」，不依赖迁移执行）：
+共 18 条，其中 16 条默认启用，2 条需密钥的插入但保持关闭。
+
+> 随机图源（`randompic` / `randomapi`）**不参与定时榜单抓取**，只服务「提示词触发返图」与「推送随机新图」。
+> 否则每次 cron 会对十几个第三方 API 各发一次请求（子请求上限风险），且随机图 id 每次都不同，会冲淡去重库与每日榜单推送。
+
+本机实测（2026-08-15，取 2 张/源）：
+
+| 结果 | 源 |
+|---|---|
+| 返回合法直链 ✅ | `lolicon`、`nekosia`、`nekos-life`、`purrbot`、`nekos-dev`、`alcy-moe`、`alcy-mp`、`alcy-ycy`、`paugram`、`loliapi-acg`、`jitsu`、`nekosapi-file`、`pic-re`、`dmoe` |
+| 本机 IP 被风控返回 0 张（保持启用，线上会自动切下一个源） | `nekos-best`、`waifu-im` |
+| 需密钥，预置为关闭 | `unsplash`、`waifu-it` |
+
 - **自有图库**：`randompic`（见第 1 节，默认优先）。
 - **不接入**：见第 6 节。
 

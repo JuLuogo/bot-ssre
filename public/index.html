@@ -144,7 +144,14 @@
 
   <div class="card">
     <h2 class="section-title">📚 数据源 / 订阅</h2>
-    <p class="section-desc">booru / Pixiv 排行榜按分级过滤后推送；RSS(RSSHub) 视为可信来源，默认跳过全年龄过滤。</p>
+    <p class="section-desc">
+      booru / Pixiv 排行榜按分级过滤后推送；RSS(RSSHub) 视为可信来源，默认跳过全年龄过滤。
+      <b>randompic / randomapi 是随机图源</b>，只服务「提示词触发返图」和「推送随机新图」，不参与定时榜单抓取。
+    </p>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn-sm ghost" id="srcSeedBtn">一键补全全部随机图 API 源</button>
+      <span class="muted">幂等：已存在的不会重复添加；需要密钥的源会加进来但保持关闭。</span>
+    </div>
     <table>
       <thead><tr><th style="width:52px">启用</th><th style="width:90px">类型</th><th>名称</th><th>参数</th><th style="width:60px">限量</th><th style="width:52px">可信</th><th style="width:130px"></th></tr></thead>
       <tbody id="srcRows"></tbody>
@@ -572,6 +579,16 @@ $("runBtn").onclick = runNow;
 $("randBtn").onclick = runRandom;
 $("diagRefreshBtn").onclick = async () => { await loadDiag(); toast("诊断已刷新"); };
 $("diagClearBtn").onclick = async () => { await api("/api/diag", "DELETE"); await loadDiag(); toast("已清空"); };
+$("srcSeedBtn").onclick = async () => {
+  const btn = $("srcSeedBtn"); btn.disabled = true; const old = btn.textContent; btn.textContent = "补全中…";
+  try {
+    const d = await api("/api/sources/seed-providers", "POST", {});
+    if (!d.ok) { toast(d.error || "补全失败", true); return; }
+    await loadSources();
+    toast(`已补全：新增 ${d.added} 个，已存在 ${d.skipped} 个`);
+  } catch (e) { toast(String(e), true); }
+  finally { btn.disabled = false; btn.textContent = old; }
+};
 $("refreshBtn").onclick = async () => { await refreshAll(); toast("已刷新"); };
 $("logoutBtn").onclick = async () => { try { await api("/api/logout", "POST"); } finally { location.reload(); } };
 $("srcSaveBtn").onclick = saveSource;
